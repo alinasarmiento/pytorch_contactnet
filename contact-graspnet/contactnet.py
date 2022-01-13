@@ -16,19 +16,17 @@ from keras.utils.np_utils import to_categorical
 
 from pointnet2.models_pointnet import FPModule, SAModule, MLP
 import utils.pcd_utils as utils
-import mesh_utils
+import utils.mesh_utils as mesh_utils
 
 class ContactNet(nn.Module):
-    def __init__(self, generate, latent_size, device, net_config, train_config):
+    def __init__(self, config):
         super().__init__()
-        self.device = device
-        self.net_config = net_config
-        self.train_config = train_config
-        self.set_abstract = self.SAnet(net_config.sa)
-        self.feat_prop = self.FPnet(net_config.fp)
-        self.multihead = self.Multihead(net_config.multi)
+        self.config = config
+        self.set_abstract = self.SAnet(config.sa)
+        self.feat_prop = self.FPnet(config.fp)
+        self.multihead = self.Multihead(config.multi)
         
-    def forward(self, input_pcd, k=2048):
+    def forward(self, input_pcd, k=None):
         '''
         maps each point in the pointcloud to a generated grasp
         Arguments
@@ -51,9 +49,9 @@ class ContactNet(nn.Module):
         s, z1, z2, w = finals # confidence prediction, grasp vector 1, grasp vector 2, grasp width
 
         # build final grasps
-        final_grasps = self.build_6d_grasps(sample_pts, z1, z2, w, self.net_config.gripper_depth)
+        final_grasps = self.build_6d_grasps(sample_pts, z1, z2, w, self.config.gripper_depth)
 
-        return final_grasps, s
+        return final_grasps, s, w
         
     def build_6d_grasps(self, contact_pts, z1, z2, w, gripper_depth):
         '''
@@ -83,16 +81,17 @@ class ContactNet(nn.Module):
         filtered_grasps = grasps[seg_mask]
         return filtered_grasps
 
-    def lossfn(self, pred_grasps, pred_success, batch_size):
+    def loss(self, pred_grasps, pred_success, pred_width, labels_dict):
         '''
         returns loss as described in original paper
         
-        labelsdict
+        labels_dict
             success (boolean)
             grasps (6d grasps)
         '''
-        success_labels = self.train_config.labelsdict.success
-        grasp_labels = self.train_config.labelsdict.grasps
+        success_labels = labels_dict['success']
+        grasp_labels = labels_dict['grasps']
+        width_labels = labels_dict['width']
 
         # -- GRASP CONFIDENCE LOSS --
         # Use binary cross entropy loss on predicted success to find top-k preds with largest loss
@@ -132,10 +131,17 @@ class ContactNet(nn.Module):
         add_s_loss = np.mean(pred_succcess*(np.min(np.linalg.norm(pred_control_points - label_control_points), 0)))
         
         # -- APPROACH AND BASELINE LOSSES --
+        #currently not used
         
         # -- WIDTH LOSS --
+        # calculates loss on 10 grasp width bins using a sigmoid fn and binary cross entropy
+        raw_width_loss = nn.BCEWithLogitsLoss(pred_width, width_labels)
+        masked_width_loss = (pred_success*raw_width_loss)[np.where(success_labels)]
+        width_loss = np.mean(masked_width_loss)
 
-        return conf_loss, add_s_loss #, approach_loss, baseline_loss, width_loss
+        total_loss = self.config.loss.conf_mult*conf_loss + self.config.loss.add_s_mult*add_s_loss + self.config.loss.width_mult*width_loss
+    
+        return conf_loss, add_s_loss, width_loss, total_loss #, approach_loss, baseline_loss
         
     def SAnet(self, cfg):
         '''
