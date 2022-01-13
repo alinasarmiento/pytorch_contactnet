@@ -10,7 +10,7 @@ import torch
 from contactnet import ContactNet
 import config
 import utils.config_utils as config_utils
-from dataloader import Dataset
+from dataloader import ContactDataset
 
 def initialize_loaders(data_pth, include_val=False):
     # TO-DO
