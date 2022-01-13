@@ -49,7 +49,7 @@ class PointNet(torch.nn.Module):
 
 
 class SAModule(torch.nn.Module):
-    def __init__(self, ratio, r, nn):
+    def __init__(self, ratio, r, nn=None):
         super(SAModule, self).__init__()
         self.ratio = ratio
         self.r = r
