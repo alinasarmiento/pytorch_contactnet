@@ -69,9 +69,9 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=1, help='number of epochs to run')
     parser.add_argument('--save_data', type=bool, default=True, help='whether or not to save data (save to path with arg --save_path)')
-    parser.add_argument('--config_path', type=str, default='./config.yaml', help='path to config yaml file')
-    parser.add_argument('--save_path', type=str, default='../data/model_save.pth', help='path to save file for main net')
-    parser.add_argument('--data_path', type=str, default='../../acronym', help='path to acronym dataset with Contact-GraspNet folder')
+    parser.add_argument('--config_path', type=str, default='./contact-graspnet/config.yaml', help='path to config yaml file')
+    parser.add_argument('--save_path', type=str, default='./checkpoints/model_save.pth', help='path to save file for main net')
+    parser.add_argument('--data_path', type=str, default='../acronym', help='path to acronym dataset with Contact-GraspNet folder')
     args = parser.parse_args()
 
     # initialize dataloaders
