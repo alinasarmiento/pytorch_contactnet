@@ -11,7 +11,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms, utils
 from torch.utils.data import DataLoader, Dataset
-from keras.utils.np_utils import to_categorical
 # TO-DO: put import of dataset here
 import utils.pcd_utils as utils
 import utils.mesh_utils as mesh_utils
