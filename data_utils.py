@@ -34,6 +34,31 @@ def load_scene_contacts(dataset_folder, test_split_only=False, num_test=None, sc
             print('corrupt, ignoring..')
     return contact_infos
 
+def regularize_pc_point_count(pc, npoints, use_farthest_point=False):
+    """
+      If point cloud pc has less points than npoints, it oversamples.
+      Otherwise, it downsample the input pc to have npoint points.
+      use_farthest_point: indicates 
+      
+      :param pc: Nx3 point cloud
+      :param npoints: number of points the regularized point cloud should have
+      :param use_farthest_point: use farthest point sampling to downsample the points, runs slower.
+      :returns: npointsx3 regularized point cloud
+    """
+    
+    if pc.shape[0] > npoints:
+        if use_farthest_point:
+            _, center_indexes = farthest_points(pc, npoints, distance_by_translation_point, return_center_indexes=True)
+        else:
+            center_indexes = np.random.choice(range(pc.shape[0]), size=npoints, replace=False)
+        pc = pc[center_indexes, :]
+    else:
+        required = npoints - pc.shape[0]
+        if required > 0:
+            index = np.random.choice(range(pc.shape[0]), size=required)
+            pc = np.concatenate((pc, pc[index, :]), axis=0)
+    return pc
+
 def preprocess_pc_for_inference(input_pc, num_point, pc_mean=None, return_mean=False, use_farthest_point=False, convert_to_internal_coords=False):
     """
     Various preprocessing of the point cloud (downsampling, centering, coordinate transforms)  

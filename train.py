@@ -5,15 +5,20 @@ import argparse
 import numpy as np
 import math
 
-#TO-DO: import data and dataloader
+#TO-DO: import data
 import torch
 from contactnet import ContactNet
 import config
 import utils.config_utils as config_utils
-from dataloader import ContactDataset
+from dataloader import get_dataloader
 
 def initialize_loaders(data_pth, include_val=False):
-    # TO-DO
+    train_loader = get_dataloader(data_pth)
+    if include_val:
+        val_loader = get_dataloader(data_pth)
+    else:
+        val_loader = None
+    return train_loader, val_loader
 
 def initialize_net(config_file):
     # Read in config yaml file to create config dictionary
@@ -70,7 +75,7 @@ if __name__=='__main__':
     args = parser.parse_args()
 
     # initialize dataloaders
-    train_loader, val_loader = initialize_loaders(args.data_path, True)
+    train_loader, val_loader = initialize_loaders(args.data_path)
     
     contactnet, config = initialize_net(args.config_path)
     train(contactnet, config, train_loader, val_loader, args.epochs, args.save_data, args.save_path)
