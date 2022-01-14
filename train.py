@@ -30,7 +30,7 @@ def initialize_net(config_file):
     return contactnet, config_dict
 
 def train(model, config, train_loader, val_loader=None, epochs=1, save=True, save_pth=None):
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config['train']['lr'])
     for epoch in range(epochs):
         # Train
         model.train()

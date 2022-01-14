@@ -467,7 +467,7 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
     radius = data_config['max_radius']
     filter_z = data_config['filter_z']
     z_val = data_config['z_val']
-    b, N = data_config.batchsize, data_config.N
+    b, N = data_config['batch_size'], data_config['num_points']
 
     dir_labels = np.array()
     approach_labels = np.array()

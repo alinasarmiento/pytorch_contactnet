@@ -139,7 +139,7 @@ class ContactNet(nn.Module):
         masked_width_loss = (pred_success*raw_width_loss)[np.where(success_labels)]
         width_loss = np.mean(masked_width_loss)
 
-        total_loss = self.config.loss.conf_mult*conf_loss + self.config.loss.add_s_mult*add_s_loss + self.config.loss.width_mult*width_loss
+        total_loss = self.config['loss']['conf_mult']*conf_loss + self.config['loss']['add_s_mult']*add_s_loss + self.config['loss']['width_mult']*width_loss
     
         return conf_loss, add_s_loss, width_loss, total_loss #, approach_loss, baseline_loss
         
@@ -148,12 +148,12 @@ class ContactNet(nn.Module):
         part of the net that downsizes the pointcloud
         
         cfg: config dict
-            radii - list of radii for each level
+            radii - nested list of radii for each level
             centers - list of number of neighborhoods to sample for each level
             mlps - list of lists of mlp layers for each level, first mlp must start with in_dimension
         '''
         sa_modules = nn.ModuleList()
-        for r, centers, mlp_list in zip(cfg.radii, cfg.centers, cfg.mlps):
+        for r, centers, mlp_list in zip(cfg['radii'], cfg['centers'], cfg['mlps']):
             module = SAModule(r, centers, MLP(mlp_list))
             sa_modules.append(module)
         return sa_modules
@@ -167,8 +167,8 @@ class ContactNet(nn.Module):
             nnlist - list of unit pointclouds to run between feat prop layers
         '''
         fp_modules = nn.ModuleList()
-        for k, nn in zip(klist, nnlist):
-            module = FPModule(k, nn)
+        for k, nn in zip(cfg['klist'], cfg['nnlist']):
+            module = FPModule(k, MLP(nn))
             fp_modules.append(module)
         return fp_modules
 
@@ -183,7 +183,7 @@ class ContactNet(nn.Module):
         note: heads are listed in order SUCCESS_CONFIDENCE, Z1, Z2, WIDTH
         '''
         head_list = []
-        for out_dim, p in zip(cfg.out_dims, cfg.ps):
-            head = nn.Sequential(nn.Conv1d(cfg.pointnet_out_dim, 128, 1), nn.Dropout(p), nn.Conv1d(128, out_dim))
+        for out_dim, p in zip(cfg['out_dims'], cfg['ps']):
+            head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim'], 128, 1), nn.Dropout(p), nn.Conv1d(128, out_dim))
             head_list.append(head)
         return head_list

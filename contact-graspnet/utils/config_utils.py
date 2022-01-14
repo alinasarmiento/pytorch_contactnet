@@ -15,7 +15,7 @@ def recursive_key_value_assign(d,ks,v):
     elif len(ks) == 1:
         d[ks[0]] = v
  
-def load_config(checkpoint_dir, batch_size=None, max_epoch=None, data_path=None, arg_configs=[], save=False):
+def load_config(checkpoint_dir, batch_size=None, num_points=None, data_path=None, arg_configs=[], save=False):
     """
     Loads yaml config file and overwrites parameters with function arguments and --arg_config parameters
     Arguments:
@@ -34,25 +34,11 @@ def load_config(checkpoint_dir, batch_size=None, max_epoch=None, data_path=None,
     config_path = config_path if os.path.exists(config_path) else os.path.join(os.path.dirname(__file__),'config.yaml')
     with open(config_path,'r') as f:
         global_config = yaml.load(f)
-
-    for conf in arg_configs:
-        k_str, v = conf.split(':')
-        try:
-            v = eval(v)
-        except:
-            pass
-        ks = [int(k) if k.isdigit() else k for k in k_str.split('.')]
-        
-        recursive_key_value_assign(global_config, ks, v)
         
     if batch_size is not None:
-        global_config['OPTIMIZER']['batch_size'] = int(batch_size)
-    if max_epoch is not None:
-        global_config['OPTIMIZER']['max_epoch'] = int(max_epoch)
-    if data_path is not None:
-        global_config['DATA']['data_path'] = data_path
-        
-    global_config['DATA']['classes'] = None
+        global_config['data']['batch_size'] = int(batch_size)
+    if num_points is not None:
+        global_config['data']['num_points'] = int(num_points)
     
     if save:
         with open(os.path.join(checkpoint_dir, 'config.yaml'),'w') as f:
