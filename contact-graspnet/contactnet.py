@@ -13,10 +13,10 @@ from torchvision import transforms, utils
 from torch.utils.data import DataLoader, Dataset
 from keras.utils.np_utils import to_categorical
 # TO-DO: put import of dataset here
-
-from pointnet2.models_pointnet import FPModule, SAModule, MLP
 import utils.pcd_utils as utils
 import utils.mesh_utils as mesh_utils
+sys.path.append('../pointnet2')
+from pointnet2.models_pointnet import FPModule, SAModule, MLP
 
 class ContactNet(nn.Module):
     def __init__(self, config):

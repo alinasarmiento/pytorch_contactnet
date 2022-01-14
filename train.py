@@ -7,8 +7,8 @@ import math
 
 #TO-DO: import data
 import torch
-from contactnet import ContactNet
-import config
+from contact-graspnet.contactnet import ContactNet
+from contactnet-graspnet import config
 import utils.config_utils as config_utils
 from dataloader import get_dataloader
 
