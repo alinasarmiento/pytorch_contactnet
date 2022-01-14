@@ -12,8 +12,8 @@ import torch.nn.functional as F
 from torchvision import transforms, utils
 from torch.utils.data import DataLoader, Dataset
 # TO-DO: put import of dataset here
-import utils.pcd_utils as utils
-import utils.mesh_utils as mesh_utils
+import model.utils.pcd_utils as utils
+import model.utils.mesh_utils as mesh_utils
 sys.path.append('../pointnet2')
 from pointnet2.models_pointnet import FPModule, SAModule, MLP
 
