@@ -61,6 +61,23 @@ def list2pose_stamped(pose, frame_id="world"):
 def unit_pose():
     return list2pose_stamped([0, 0, 0, 0, 0, 0, 1])
 
+def unit_pose_matrix():
+    return np.array([[0, 0, 0],[0, 0, 0],[0, 0, 1]])
+
+def get_transform(pose_frame_target, pose_frame_source):
+    """
+    Find transform that transforms pose source to pose target
+    :param pose_frame_target:
+    :param pose_frame_source:
+    :return:
+    """
+    #both poses must be expressed in same reference frame
+    T_target_world = matrix_from_pose(pose_frame_target)
+    T_source_world = matrix_from_pose(pose_frame_source)
+    T_relative_world = np.matmul(T_target_world, np.linalg.inv(T_source_world))
+    pose_relative_world = pose_from_matrix(
+        T_relative_world, frame_id=pose_frame_source.header.frame_id)
+    return pose_relative_world
 
 def convert_reference_frame(pose_source, pose_frame_target, pose_frame_source, frame_id=None):
     T_pose_source = matrix_from_pose(pose_source)
