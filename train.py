@@ -4,18 +4,17 @@ import sys
 import argparse
 import numpy as np
 import math
-
+#test
 #TO-DO: import data
 import torch
 from model.contactnet import ContactNet
-from model import config
-import utils.config_utils as config_utils
-from dataloader import get_dataloader
+import model.utils.config_utils as config_utils
+from dataset import get_dataloader
 
-def initialize_loaders(data_pth, include_val=False):
-    train_loader = get_dataloader(data_pth)
+def initialize_loaders(data_pth, data_config, include_val=False):
+    train_loader = get_dataloader(data_pth, data_config)
     if include_val:
-        val_loader = get_dataloader(data_pth)
+        val_loader = get_dataloader(data_pth, data_config)
     else:
         val_loader = None
     return train_loader, val_loader
@@ -23,10 +22,10 @@ def initialize_loaders(data_pth, include_val=False):
 def initialize_net(config_file):
     # Read in config yaml file to create config dictionary
     config_dict = config_utils.load_config(config_file)
-    
+    print(config_dict)
     # Init net
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    contactnet = ContactNet(config_dict).to(device)
+    contactnet = ContactNet(config_dict, device).to(device)
     return contactnet, config_dict
 
 def train(model, config, train_loader, val_loader=None, epochs=1, save=True, save_pth=None):
@@ -69,13 +68,16 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=1, help='number of epochs to run')
     parser.add_argument('--save_data', type=bool, default=True, help='whether or not to save data (save to path with arg --save_path)')
-    parser.add_argument('--config_path', type=str, default='./contact-graspnet/config.yaml', help='path to config yaml file')
+    parser.add_argument('--config_path', type=str, default='./model/config.yaml', help='path to config yaml file')
     parser.add_argument('--save_path', type=str, default='./checkpoints/model_save.pth', help='path to save file for main net')
-    parser.add_argument('--data_path', type=str, default='../acronym', help='path to acronym dataset with Contact-GraspNet folder')
+    parser.add_argument('--data_path', type=str, default='/home/alinasar/acronym/scene_contacts', help='path to acronym dataset with Contact-GraspNet folder')
     args = parser.parse_args()
 
     # initialize dataloaders
-    train_loader, val_loader = initialize_loaders(args.data_path)
+    #train_loader, val_loader = initialize_loaders(args.data_path)
     
     contactnet, config = initialize_net(args.config_path)
+    data_config = config['data']
+    train_loader, val_loader = initialize_loaders(args.data_path, data_config)
+
     train(contactnet, config, train_loader, val_loader, args.epochs, args.save_data, args.save_path)

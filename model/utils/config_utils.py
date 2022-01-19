@@ -31,7 +31,7 @@ def load_config(checkpoint_dir, batch_size=None, num_points=None, data_path=None
     """
 
     config_path = os.path.join(checkpoint_dir, 'config.yaml')
-    config_path = config_path if os.path.exists(config_path) else os.path.join(os.path.dirname(__file__),'config.yaml')
+    config_path = config_path #if os.path.exists(config_path) else os.path.join(os.path.dirname(__file__),'config.yaml')
     with open(config_path,'r') as f:
         global_config = yaml.load(f)
         

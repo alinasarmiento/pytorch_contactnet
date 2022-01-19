@@ -18,12 +18,13 @@ sys.path.append('../pointnet2')
 from pointnet2.models_pointnet import FPModule, SAModule, MLP
 
 class ContactNet(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, device):
         super().__init__()
         self.config = config
-        self.set_abstract = self.SAnet(config.sa)
-        self.feat_prop = self.FPnet(config.fp)
-        self.multihead = self.Multihead(config.multi)
+        self.device = device
+        self.set_abstract = self.SAnet(config['model']['sa'])
+        self.feat_prop = self.FPnet(config['model']['fp'])
+        self.multihead = self.Multihead(config['model']['multi'])
         
     def forward(self, input_pcd, k=None):
         '''
@@ -152,9 +153,10 @@ class ContactNet(nn.Module):
             mlps - list of lists of mlp layers for each level, first mlp must start with in_dimension
         '''
         sa_modules = nn.ModuleList()
-        for r, centers, mlp_list in zip(cfg['radii'], cfg['centers'], cfg['mlps']):
-            module = SAModule(r, centers, MLP(mlp_list))
-            sa_modules.append(module)
+        for r_list, center, mlp_list in zip(cfg['radii'], cfg['centers'], cfg['mlps']):
+            for r, mlp_layers in zip(r_list, mlp_list):
+                module = SAModule(r, center, MLP(mlp_layers))
+                sa_modules.append(module)
         return sa_modules
         
     def FPnet(self, cfg):
@@ -166,12 +168,12 @@ class ContactNet(nn.Module):
             nnlist - list of unit pointclouds to run between feat prop layers
         '''
         fp_modules = nn.ModuleList()
-        for k, nn in zip(cfg['klist'], cfg['nnlist']):
-            module = FPModule(k, MLP(nn))
+        for k, layer_list in zip(cfg['klist'], cfg['nnlist']):
+            module = FPModule(k, MLP(layer_list))
             fp_modules.append(module)
         return fp_modules
 
-    def multihead(self, cfg):
+    def Multihead(self, cfg):
         '''
         four multihead net from feature propagation, creates final predictions
 
@@ -183,6 +185,6 @@ class ContactNet(nn.Module):
         '''
         head_list = []
         for out_dim, p in zip(cfg['out_dims'], cfg['ps']):
-            head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim'], 128, 1), nn.Dropout(p), nn.Conv1d(128, out_dim))
+            head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim'], 128, 1), nn.Dropout(p), nn.Conv1d(128, out_dim, 1))
             head_list.append(head)
         return head_list

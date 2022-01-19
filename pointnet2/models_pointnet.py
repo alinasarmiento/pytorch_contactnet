@@ -3,7 +3,7 @@ from torch_geometric.nn import PointConv, fps, radius, global_max_pool
 import torch.nn.functional as F
 import torch
 from torch.nn import Sequential as Seq, Linear as Lin, ReLU, BatchNorm1d as BN
-import pyyaml
+import yaml
 
 class FPModule(torch.nn.Module):
     def __init__(self, k, nn):
