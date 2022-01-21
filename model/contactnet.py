@@ -45,13 +45,13 @@ class ContactNet(nn.Module):
             feature_cat = torch.Tensor().to(self.device)
             for i, module in enumerate(module_list):
                 print(i)
-                feat, pos, batch = module(*input_list)
-                '''
+                #feat, pos, batch = module(*input_list)
+                
                 if i==0:    
                     feat, pos, batch, idx = module(*input_list)
                 else:
                     feat, pos, batch, idx = module(*input_list, sample=False, idx=idx)
-                '''
+                
                 feature_cat = torch.cat((feature_cat, feat), 1)
             print('concatenated feature vector of shape:', feature_cat.shape)
             input_list = (feature_cat, pos, batch)
@@ -59,17 +59,32 @@ class ContactNet(nn.Module):
 
         for module, skip in zip(self.feat_prop, skip_layers):
             print('MODULE FEAT PROP')
-            print(input_list[0].shape)
-            print(skip[0].shape)
             input_list = module(*input_list, *skip)
-        point_features =  input_list[0] #self.feat_prop(latent) #pointwise features
+        point_features =  input_list[0]  #pointwise features
+
+        # unsqueeze point features and points into batches
+        '''
+        num_batches = int(torch.max(input_list[2]))+1
+        batch_shape = (num_batches, int(point_features.shape[0]/num_batches), -1) 
+        pts_shape = (num_batches, int(input_list[1].shape[0]/num_batches), -1) 
+        point_features = point_features.view(batch_shape).to(self.device)
+        points = input_list[1].view(pts_shape).to(self.device)
+        point_features = torch.cat((points, point_features), 2)
+        point_features = point_features.transpose(1, 2)
+        '''
+        points = input_list[1]
+        point_features = torch.cat((points, point_features), 1)
+        point_features = torch.unsqueeze(point_features, 0)
+        point_features = point_features.transpose(1, 2)
+        # feed into final multihead
         finals = []
         for net in self.multihead:
-            finals.append(net(point_features))
+            result = torch.flatten(net(point_features).transpose(1,2), start_dim=0, end_dim=1)
+            finals.append(result)
         s, z1, z2, w = finals # confidence prediction, grasp vector 1, grasp vector 2, grasp width
 
         # build final grasps
-        final_grasps = self.build_6d_grasps(sample_pts, z1, z2, w, self.config.gripper_depth)
+        final_grasps = self.build_6d_grasps(points, z1, z2, w, self.config['gripper_depth'])
 
         return final_grasps, s, w
         
@@ -78,8 +93,16 @@ class ContactNet(nn.Module):
         builds full 6 dimensional grasps based on generated vectors, width, and pointcloud
         '''
         # calculate baseline and approach vectors based on z1 and z2
+        contact_pts = contact_pts.cpu().detach().numpy()
+        z1 = z1.cpu().detach().numpy()
+        z2 = z2.cpu().detach().numpy()
+        w = w.cpu().detach().numpy()
+        print('forward pass complete! found vectors and width:', z1.shape, z2.shape, w.shape)
+        print('contact points of shape:', contact_pts.shape)
         base_dirs = z1/np.linalg.norm(z1)
-        approach_dirs = (z2 - (np.dot(base_dirs, z2)*base_dirs))/np.linalg.norm(z2)
+        inner = np.einsum('ij, ij->i',base_dirs, z2)
+        prod = base_dirs*inner[:, np.newaxis]
+        approach_dirs = (z2 - prod)/np.linalg.norm(z2)
         
         # build grasps
         grasps = []
@@ -218,7 +241,7 @@ class ContactNet(nn.Module):
         '''
         head_list = []
         for out_dim, p in zip(cfg['out_dims'], cfg['ps']):
-            head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim'], 128, 1), nn.Dropout(p), nn.Conv1d(128, out_dim, 1))
+            head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim'], 128, 1), nn.Dropout(p), nn.Conv1d(128, out_dim, 1)).to(self.device)
             head_list.append(head)
         print('head list!!', head_list)
         return head_list

@@ -8,6 +8,7 @@ import math
 import torch
 from model.contactnet import ContactNet
 import model.utils.config_utils as config_utils
+from data_utils import compute_labels
 from dataset import get_dataloader
 
 def initialize_loaders(data_pth, data_config, include_val=False):
@@ -22,7 +23,7 @@ def initialize_net(config_file):
     torch.cuda.empty_cache()
     # Read in config yaml file to create config dictionary
     config_dict = config_utils.load_config(config_file)
-    #print(config_dict)
+    print(config_dict)
     # Init net
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     contactnet = ContactNet(config_dict, device).to(device)
