@@ -2,8 +2,10 @@ import os
 import sys
 import glob
 import numpy as np
-from scipy.spatial import KDTree
+from scipy.spatial import KDTree, cKDTree
 from scene_renderer import SceneRenderer
+import trimesh.transformations as tra
+import copy
 
 def load_scene_contacts(dataset_folder, test_split_only=False, num_test=None, scene_contacts_path='scene_contacts_new'):
     """
@@ -22,7 +24,7 @@ def load_scene_contacts(dataset_folder, test_split_only=False, num_test=None, sc
         scene_contact_paths = scene_contact_paths[-num_test:]
     contact_infos = []
     for contact_path in scene_contact_paths:
-        print(contact_path)
+        #print(contact_path)
         try:
             npz = np.load(contact_path, allow_pickle=False)
             contact_info = {'scene_contact_points':npz['scene_contact_points'],
@@ -228,7 +230,7 @@ def depth2pc(depth, K, rgb=None):
     return (pc, rgb)
 
 
-def estimate_normals_cam_from_pc(self, pc_cam, max_radius=0.05, k=12):
+def estimate_normals_cam_from_pc(pc_cam, max_radius=0.05, k=12):
     """
     Estimates normals in camera coords from given point cloud.
     Arguments:
@@ -748,7 +750,7 @@ class PointCloudReader:
         pc = regularize_pc_point_count(pc, self._raw_num_points, use_farthest_point=self._use_farthest_point)
         pc = self._augment_pc(pc)
         
-        pc_normals = estimate_normals_cam_from_pc(pc[:,:3], raw_num_points=self._raw_num_points) if estimate_normals else []
+        pc_normals = estimate_normals_cam_from_pc(pc_cam=pc[:,:3]) if estimate_normals else []
 
         return pc, pc_normals, camera_pose, depth, camera_orientation
 

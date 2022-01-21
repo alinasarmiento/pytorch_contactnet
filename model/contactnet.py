@@ -1,4 +1,3 @@
-import os
 import os.path
 import sys
 import numpy as np
@@ -11,7 +10,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms, utils
 from torch.utils.data import DataLoader, Dataset
-# TO-DO: put import of dataset here
 import model.utils.pcd_utils as utils
 import model.utils.mesh_utils as mesh_utils
 sys.path.append('../pointnet2')
@@ -26,7 +24,7 @@ class ContactNet(nn.Module):
         self.feat_prop = self.FPnet(config['model']['fp'])
         self.multihead = self.Multihead(config['model']['multi'])
         
-    def forward(self, input_pcd, k=None):
+    def forward(self, input_pcd, pos, batch, k=None):
         '''
         maps each point in the pointcloud to a generated grasp
         Arguments
@@ -35,14 +33,36 @@ class ContactNet(nn.Module):
         Returns
             list of grasps (4x4 numpy arrays)
         '''
-        # sample points on the pointcloud to generate grasps from
+        
         sample_pts = input_pcd
         if k is not None:
             sample_pts = utils.farthest_point_downsample(input_pcd, k)
-        
-        # pass sampled points through network to generate grasps
-        latent = self.set_abstract(sample_pts) #high dimensional, sparse set abstraction
-        point_features = self.feat_prop(latent) #pointwise features
+        input_list = (sample_pts, pos, batch)
+
+        skip_layers = [input_list]
+        for module_list in self.set_abstract:
+            print('MODULE SA')
+            feature_cat = torch.Tensor().to(self.device)
+            for i, module in enumerate(module_list):
+                print(i)
+                feat, pos, batch = module(*input_list)
+                '''
+                if i==0:    
+                    feat, pos, batch, idx = module(*input_list)
+                else:
+                    feat, pos, batch, idx = module(*input_list, sample=False, idx=idx)
+                '''
+                feature_cat = torch.cat((feature_cat, feat), 1)
+            print('concatenated feature vector of shape:', feature_cat.shape)
+            input_list = (feature_cat, pos, batch)
+            skip_layers.insert(0, input_list)
+
+        for module, skip in zip(self.feat_prop, skip_layers):
+            print('MODULE FEAT PROP')
+            print(input_list[0].shape)
+            print(skip[0].shape)
+            input_list = module(*input_list, *skip)
+        point_features =  input_list[0] #self.feat_prop(latent) #pointwise features
         finals = []
         for net in self.multihead:
             finals.append(net(point_features))
@@ -152,11 +172,24 @@ class ContactNet(nn.Module):
             centers - list of number of neighborhoods to sample for each level
             mlps - list of lists of mlp layers for each level, first mlp must start with in_dimension
         '''
-        sa_modules = nn.ModuleList()
+        sa_modules = [] #nn.ModuleList()
+        input_size = 0
+        num_points = 20000
         for r_list, center, mlp_list in zip(cfg['radii'], cfg['centers'], cfg['mlps']):
+            layer_modules = []
+            feat_cat_size = 0
+            input_size += 3
             for r, mlp_layers in zip(r_list, mlp_list):
-                module = SAModule(r, center, MLP(mlp_layers))
-                sa_modules.append(module)
+                mlp_layers.insert(0, input_size)
+                print ('building SAnet', r, center, mlp_layers)
+                module = SAModule((center/num_points), r, MLP(mlp_layers)).to(self.device)
+                layer_modules.append(copy.deepcopy(module))
+                feat_cat_size += mlp_layers[-1] #keep track of how big the concatenated feature vector is for MSG
+            num_points = center
+            input_size = feat_cat_size
+            print(feat_cat_size)
+            sa_modules.append(nn.ModuleList(copy.deepcopy(layer_modules)))
+        #raise Exception
         return sa_modules
         
     def FPnet(self, cfg):
@@ -187,4 +220,5 @@ class ContactNet(nn.Module):
         for out_dim, p in zip(cfg['out_dims'], cfg['ps']):
             head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim'], 128, 1), nn.Dropout(p), nn.Conv1d(128, out_dim, 1))
             head_list.append(head)
+        print('head list!!', head_list)
         return head_list

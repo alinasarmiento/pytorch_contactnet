@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, Dataset
 def get_dataloader(data_path, data_config=None):
     #data_path = os.path.join(os.getcwd(), data_path)
     dataset = ContactDataset(data_path, data_config)
-    dataloader = DataLoader(dataset)
+    dataloader = DataLoader(dataset, batch_size=data_config['batch_size'])
     return dataloader
 
 def extract_point_clouds(self, depth, K, segmap=None, rgb=None, z_range=[0.2,1.8], segmap_id=0, skip_border_objects=False, margin_px=5):
@@ -60,18 +60,20 @@ class ContactDataset(Dataset):
     def __init__(self, data_path, data_config):
         self.data = []
         data_path = os.fsencode(data_path)
-        pcreader = data_utils.PointCloudReader(data_path, data_config['batch_size'])
+        self.pcreader = data_utils.PointCloudReader(data_path, data_config['batch_size'], pc_augm_config=data_config['pc_augm'], depth_augm_config=data_config['depth_augm'])
+        self.data = os.listdir(data_path)
+
+        '''
         for file in os.listdir(data_path):
             filename = os.fsdecode(file)
             data_dict = {}
             pc_segments = {}
             pc_cam, pc_normals, camera_pose, depth, cam_mat = pcreader.render_random_scene(estimate_normals=True)
-            segmap = None #temporary
 
             #segmap, rgb, depth, cam_K, pc_full, pc_colors = data_utils.load_available_input_data(filename, K=None)
             #print('Converting depth to point cloud(s)...')
-            pc_full, pc_segments, pc_colors = extract_point_clouds(depth, cam_mat, segmap=segmap, rgb=rgb,
-                                                                                    skip_border_objects=skip_border_objects, z_range=[0.2, 1.8])
+            #pc_full, pc_segments, pc_colors = extract_point_clouds(depth, cam_mat, segmap=segmap, rgb=rgb,
+            #                                                                        skip_border_objects=skip_border_objects, z_range=[0.2, 1.8])
             #pc, pc_mean = preprocess_pc_for_inference(pc_full.squeeze(), self._num_input_points, return_mean=True, convert_to_internal_coords=convert_cam_coords)
 
             data_dict['pcd'] = pc
@@ -81,15 +83,29 @@ class ContactDataset(Dataset):
 
             self.data.append(data_dict)
         print('Data preprocessing complete.')
-        
-    def __getitem__(self, idx):
-        data_dict = self.data[idx]
-        pcd = data_dict['pcd']
-        pcd_mean = data_dict['pcd_mean']
-        pcd_segments = data_dict['pcd_segments']
-        pcd_colors = data_dict['colors']
+        '''
 
-        return pcd, pcd_mean, pcd_segments, pcd_colors
+    def __getitem__(self, idx):
+        data_file = self.data[idx]
+        #fixed_name = os.fsdecode(data_file).split('/')[-1]
+        #print(fixed_name)
+        filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
+        scene_data = load(filename)
+        obj_paths = scene_data['obj_paths']
+        for i, path in enumerate(obj_paths):
+            fixed_path = '../acronym/models/' + path.split('/')[-1]
+            obj_paths[i] = fixed_path
+        #print(obj_paths)
+        obj_scales = scene_data['obj_scales']
+        obj_transforms = scene_data['obj_transforms']
+
+        self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
+        pc_cam, pc_normals, camera_pose, depth, cam_mat = self.pcreader.render_random_scene(estimate_normals=True)
+        
+        pcd = pc_cam[:, :3]
+        pcd_normals = pc_normals[:, :3]
+        
+        return pcd, pcd_normals, camera_pose
 
     def __len__(self):
         return len(self.data)

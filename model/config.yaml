@@ -18,24 +18,28 @@ model:
       - - - 32
           - 32
           - 64
+          - 128
         - - 64
           - 64
           - 128
-        - - 64
+        - - 128
+          - 64
           - 96
           - 128
       - - - 64
           - 64
           - 128
+          - 256
         - - 128
           - 128
           - 256
-        - - 128
+        - - 256
           - 128
           - 256
       - - - 64
           - 64
           - 128
+          - 256
         - - 128
           - 128
           - 256
@@ -48,11 +52,14 @@ model:
       - 3
       - 3
     nnlist:
-      - - 256
+      - - 1536
+        - 512
         - 256
-      - - 256
+      - - 1536
+        - 512
         - 128
-      - - 128
+      - - 768
+        - 256
         - 128
         - 128
   multi:
@@ -73,14 +80,23 @@ loss:
   add_s_mult: 10
   width_mult: 1
 data:
+  pc_augm:
+    occlusion_nclusters: 0
+    occlusion_dropout_rate: 0.0
+    sigma: 0.000
+    clip: 0.005
+  depth_augm:
+    sigma: 0.001
+    clip: 0.005
+    gaussian_kernel: 0
   labels:
     num_pos_contacts: 0
   k: 1
   max_radius: 0.005
   filter_z: True
   z_val: -0.1
-  batch_size: 1
+  batch_size: 2
   num_points: 2048
-  train:
-    lr: 0.005
+train:
+  lr: 0.005
 
