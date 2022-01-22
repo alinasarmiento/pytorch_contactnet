@@ -408,7 +408,7 @@ def load_contact_grasps(contact_list, data_config):
     pos_contact_dirs = []
     pos_finger_diffs = []
     pos_approach_dirs = []
-
+    pos_grasp_transforms = []
     for i,c in enumerate(contact_list):
         contact_directions_01 = c['scene_contact_points'][:,0,:] - c['scene_contact_points'][:,1,:]
         all_contact_points = c['scene_contact_points'].reshape(-1,3)
@@ -424,13 +424,14 @@ def load_contact_grasps(contact_list, data_config):
         if len(pos_idcs) == 0:
             continue
         print('total positive contact points ', len(pos_idcs))
-        
         all_pos_contact_points = all_contact_points[pos_idcs]
         all_pos_finger_diffs = all_finger_diffs[pos_idcs//2]
         all_pos_contact_dirs = all_contact_directions[pos_idcs]
         all_pos_approach_dirs = all_approach_directions[pos_idcs//2]
+        all_grasp_transform = all_grasp_transform[pos_idcs//2]
         
         # Use all positive contacts then mesh_utils with replacement
+        print(num_pos_contacts, len(all_pos_contact_points))
         if num_pos_contacts > len(all_pos_contact_points)/2:
             pos_sampled_contact_idcs = np.arange(len(all_pos_contact_points))
             pos_sampled_contact_idcs_replacement = np.random.choice(np.arange(len(all_pos_contact_points)), num_pos_contacts*2 - len(all_pos_contact_points) , replace=True) 
@@ -442,14 +443,15 @@ def load_contact_grasps(contact_list, data_config):
         pos_contact_dirs.append(all_pos_contact_dirs[pos_sampled_contact_idcs,:])
         pos_finger_diffs.append(all_pos_finger_diffs[pos_sampled_contact_idcs])
         pos_approach_dirs.append(all_pos_approach_dirs[pos_sampled_contact_idcs])
-
+        pos_grasp_transforms.append(all_grasp_transform[pos_sampled_contact_idcs,:])
+        
     scene_idcs = np.arange(0,len(pos_contact_points))
     contact_points = np.array(pos_contact_points)
-    contact_dirs =  np.linalg.norm(np.array(pos_contact_dirs), axis=2)
+    grasp_poses = np.array(pos_grasp_transforms)
+    contact_dirs = np.array(pos_contact_dirs)
     finger_diffs = np.array(pos_finger_diffs)
-    contact_approaches =  np.linalg.norm(np.array(pos_approach_dirs), axis=2)
-
-    return contact_points, contact_dirs, contact_approaches, finger_diffs, scene_idcs
+    contact_approaches =  np.array(pos_approach_dirs)
+    return contact_points, grasp_poses, contact_dirs, contact_approaches, finger_diffs, scene_idcs
 
 def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, pos_contact_approaches, pos_finger_diffs, data_config):
     """
@@ -471,30 +473,35 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
     filter_z = data_config['filter_z']
     z_val = data_config['z_val']
     b, N = data_config['batch_size'], data_config['num_points']
-
-    dir_labels = np.array()
-    approach_labels = np.array()
-    width_labels = np.array()
-    success_labels = np.array()
-    for pcd, cam_pose in zip(obs_pcds, cam_poses):
+    pos_contact_pts_mesh = pos_contact_pts_mesh.reshape(b, -1, 3)
+    dir_labels = []
+    approach_labels = []
+    width_labels = []
+    success_labels = []
+    for pcd, cam_pose, gt_pcd, gt_dir, gt_appr, gt_width in zip(obs_pcds, cam_poses, pos_contact_pts_mesh, pos_contact_dirs, pos_contact_approaches, pos_finger_diffs):
+        pcd = pcd.cpu().detach().numpy()
         # Convert point cloud to world frame
         cam_transform = np.linalg.inv(cam_pose)
-        pcd = np.concatenate(pcd, np.ones((pcd.shape[0], 1)))
-        pcd = np.matmul(pcd, cam_transform)[:, :, :3]
-
+        pcd = np.concatenate((pcd, np.ones((pcd.shape[0], 1))), 1)
+        pcd = np.matmul(pcd, cam_transform)[:, :3]
         # Find K nearest neighbors to each point from labeled contacts
-        combined_pcd = np.concatenate(pcd, pos_contact_pts_mesh)
+        combined_pcd = np.concatenate((pcd, gt_pcd), 0)
         knn_tree = KDTree(combined_pcd)
-        dists, indices = knn_tree.query(pos_contact_pts_mesh, nsample, distance_upper_bound=radius) # M x k x 1
+        dists, indices = knn_tree.query(gt_pcd, nsample, distance_upper_bound=radius) # M x k x 1
 
+        indices -= N
         # Create corresponding lists for baseline, approach, width, and binary success
         dirs = np.zeros_like(pcd)
         approaches = np.zeros_like(pcd)
-        widths = np.zeros_like([N, 1])
+        widths = np.zeros([N, 1])
+        print('dirs shape', dirs.shape)
+        
         for label_index, index_list in enumerate(indices):
-            dirs[index_list] = pos_contact_dirs[label_index]
-            approaches[index_list] = pos_contact_approaches[label_index]
-            widths[index_list] = pos_finger_diffs[label_index]
+            #from IPython import embed
+            #embed()
+            dirs[index_list] = gt_dir[0, :][label_index]
+            approaches[index_list] = gt_appr[0, :][label_index]
+            widths[index_list] = gt_width[0, :][label_index]
         success = np.where(widths>0, 1, 0)
 
         dir_labels.append(dirs)

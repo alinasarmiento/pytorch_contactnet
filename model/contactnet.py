@@ -61,17 +61,7 @@ class ContactNet(nn.Module):
             print('MODULE FEAT PROP')
             input_list = module(*input_list, *skip)
         point_features =  input_list[0]  #pointwise features
-
-        # unsqueeze point features and points into batches
-        '''
-        num_batches = int(torch.max(input_list[2]))+1
-        batch_shape = (num_batches, int(point_features.shape[0]/num_batches), -1) 
-        pts_shape = (num_batches, int(input_list[1].shape[0]/num_batches), -1) 
-        point_features = point_features.view(batch_shape).to(self.device)
-        points = input_list[1].view(pts_shape).to(self.device)
-        point_features = torch.cat((points, point_features), 2)
-        point_features = point_features.transpose(1, 2)
-        '''
+        
         points = input_list[1]
         point_features = torch.cat((points, point_features), 1)
         point_features = torch.unsqueeze(point_features, 0)
@@ -85,8 +75,20 @@ class ContactNet(nn.Module):
 
         # build final grasps
         final_grasps = self.build_6d_grasps(points, z1, z2, w, self.config['gripper_depth'])
+        final_grasps = torch.Tensor(final_grasps)
+        # unsqueeze point features and points into batches
+        
+        num_batches = int(torch.max(input_list[2]))+1
+        pts_shape = (num_batches, int(input_list[1].shape[0]/num_batches), -1)
+        grasp_shape = (num_batches, int(input_list[1].shape[0]/num_batches), 4, 4)
+        scalar_shape = (num_batches, int(input_list[1].shape[0]/num_batches))
 
-        return final_grasps, s, w
+        points = input_list[1].view(pts_shape).to(self.device)
+        final_grasps = final_grasps.view(grasp_shape)
+        s = s.view(scalar_shape)
+        w = w.view(scalar_shape)
+        
+        return points, final_grasps.cpu().detach().numpy(), s, w
         
     def build_6d_grasps(self, contact_pts, z1, z2, w, gripper_depth):
         '''

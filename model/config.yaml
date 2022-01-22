@@ -90,7 +90,7 @@ data:
     clip: 0.005
     gaussian_kernel: 0
   labels:
-    num_pos_contacts: 0
+    num_pos_contacts: 50
   k: 1
   max_radius: 0.005
   filter_z: True

@@ -36,18 +36,28 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
         model.train()
         running_loss = 0.0
         for i, data in enumerate(train_loader):
-            #print(data)
-            scene_pcds, normals, cam_poses = data
+            scene_pcds, normals, cam_poses, gt_dict = data
             # scene_pcds shape is (batch size, num points, 3)
             data_shape = scene_pcds.shape
-            #print(data_shape)
             batch_list = torch.arange(0, data_shape[0])
             batch_list = batch_list[:, None].repeat(1, data_shape[1])
             batch_list = batch_list.view(-1).long().to(model.device)
             pcd = scene_pcds.view(-1, data_shape[2]).to(model.device)
+
             optimizer.zero_grad()
-            pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list, k=None)
-            loss = model.loss(pred_grasps, pred_successes, pred_widths, label_dicts)
+            points, pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list, k=None)
+            base_dirs, width, success, approach_dirs = compute_labels(gt_dict['contact_pts'],
+                                                                      points,
+                                                                      cam_poses,
+                                                                      gt_dict['base_dirs'],
+                                                                      gt_dict['approach_dirs'],
+                                                                      gt_dict['offsets'],
+                                                                      config['data'])
+            labels_dict = {}
+            labels_dict['success'] = success
+            labels_dict['grasps'] = gt_dict['grasp_poses']
+            labels_dict['width'] = width
+            loss = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict)
 
             loss.backward(retain_graph=True)
             optimizer.step()
@@ -63,7 +73,7 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
             with torch.no_grad():
                 for i, data in enumerate(val_loader):
                     scene_pcds, label_dicts  = data
-                    pred_grasps, pred_successes, pred_widths = model(scene_pcds)
+                    points, pred_grasps, pred_successes, pred_widths = model(scene_pcds)
                     val_loss = model.loss(pred_grasps, pred_successes, pred_widths, label_dicts)
             print('Validation Loss: %.3f %%' % val_loss)
 

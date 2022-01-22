@@ -59,43 +59,41 @@ def extract_point_clouds(self, depth, K, segmap=None, rgb=None, z_range=[0.2,1.8
 class ContactDataset(Dataset):
     def __init__(self, data_path, data_config):
         self.data = []
+        self.data_config = data_config
         data_path = os.fsencode(data_path)
         self.pcreader = data_utils.PointCloudReader(data_path, data_config['batch_size'], pc_augm_config=data_config['pc_augm'], depth_augm_config=data_config['depth_augm'])
         self.data = os.listdir(data_path)
 
-        '''
-        for file in os.listdir(data_path):
-            filename = os.fsdecode(file)
-            data_dict = {}
-            pc_segments = {}
-            pc_cam, pc_normals, camera_pose, depth, cam_mat = pcreader.render_random_scene(estimate_normals=True)
-
-            #segmap, rgb, depth, cam_K, pc_full, pc_colors = data_utils.load_available_input_data(filename, K=None)
-            #print('Converting depth to point cloud(s)...')
-            #pc_full, pc_segments, pc_colors = extract_point_clouds(depth, cam_mat, segmap=segmap, rgb=rgb,
-            #                                                                        skip_border_objects=skip_border_objects, z_range=[0.2, 1.8])
-            #pc, pc_mean = preprocess_pc_for_inference(pc_full.squeeze(), self._num_input_points, return_mean=True, convert_to_internal_coords=convert_cam_coords)
-
-            data_dict['pcd'] = pc
-            data_dict['pcd_mean'] = pc_mean
-            data_dict['pcd_segments'] = pc_segments
-            data_dict['colors'] = pc_colors
-
-            self.data.append(data_dict)
-        print('Data preprocessing complete.')
-        '''
-
     def __getitem__(self, idx):
         data_file = self.data[idx]
-        #fixed_name = os.fsdecode(data_file).split('/')[-1]
-        #print(fixed_name)
         filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
         scene_data = load(filename)
+
+        # get positive grasp info
+        '''
+        grasp_transforms = scene_data['grasp_transforms']
+        contact_pts = scene_data['scene_contact_points']
+        contacts1, contacts2 = np.split(contact_pts, 2, axis=1) #split contact points into first and second point
+        contacts1, contacts2 = contacts1.reshape(-1, 3), contacts2.reshape(-1, 3) 
+        offsets = np.linalg.norm(np.subtract(contacts1, contacts2))
+        '''
+        contact_pts, grasp_poses, base_dirs, approach_dirs, offsets, idcs = data_utils.load_contact_grasps([scene_data], self.data_config)
+        print('in loader!')
+        print(contact_pts.shape)
+        print(grasp_poses.shape)
+        gt_contact_info = {}
+        gt_contact_info['contact_pts'] = contact_pts
+        gt_contact_info['grasp_poses'] = grasp_poses
+        gt_contact_info['base_dirs'] = base_dirs
+        gt_contact_info['approach_dirs'] = approach_dirs
+        gt_contact_info['offsets'] = offsets
+        gt_contact_info['idcs'] = idcs
+        
+        # render point clouds
         obj_paths = scene_data['obj_paths']
         for i, path in enumerate(obj_paths):
             fixed_path = '../acronym/models/' + path.split('/')[-1]
             obj_paths[i] = fixed_path
-        #print(obj_paths)
         obj_scales = scene_data['obj_scales']
         obj_transforms = scene_data['obj_transforms']
 
@@ -105,7 +103,7 @@ class ContactDataset(Dataset):
         pcd = pc_cam[:, :3]
         pcd_normals = pc_normals[:, :3]
         
-        return pcd, pcd_normals, camera_pose
+        return pcd, pcd_normals, camera_pose, gt_contact_info
 
     def __len__(self):
         return len(self.data)
