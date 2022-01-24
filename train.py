@@ -23,7 +23,7 @@ def initialize_net(config_file):
     torch.cuda.empty_cache()
     # Read in config yaml file to create config dictionary
     config_dict = config_utils.load_config(config_file)
-    print(config_dict)
+    #print(config_dict)
     # Init net
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     contactnet = ContactNet(config_dict, device).to(device)
@@ -64,7 +64,7 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
             optimizer.step()
             running_loss += loss
             
-            if i%10 == 9:
+            if i%1 == 0:
                 print('[Epoch: %d, Batch: %4d / %4d], Train Loss: %.3f' % (epoch + 1, (i) + 1, len(train_loader), running_loss/10))
                 running_loss = 0.0
 

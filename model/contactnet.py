@@ -41,11 +41,9 @@ class ContactNet(nn.Module):
 
         skip_layers = [input_list]
         for module_list in self.set_abstract:
-            print('MODULE SA')
+            
             feature_cat = torch.Tensor().to(self.device)
             for i, module in enumerate(module_list):
-                print(i)
-                #feat, pos, batch = module(*input_list)
                 
                 if i==0:    
                     feat, pos, batch, idx = module(*input_list)
@@ -53,12 +51,12 @@ class ContactNet(nn.Module):
                     feat, pos, batch, idx = module(*input_list, sample=False, idx=idx)
                 
                 feature_cat = torch.cat((feature_cat, feat), 1)
-            print('concatenated feature vector of shape:', feature_cat.shape)
+            
             input_list = (feature_cat, pos, batch)
             skip_layers.insert(0, input_list)
 
         for module, skip in zip(self.feat_prop, skip_layers):
-            print('MODULE FEAT PROP')
+            #print('MODULE FEAT PROP')
             input_list = module(*input_list, *skip)
         point_features =  input_list[0]  #pointwise features
         
@@ -104,8 +102,7 @@ class ContactNet(nn.Module):
         z1 = z1.cpu().detach().numpy()
         z2 = z2.cpu().detach().numpy()
         w = w.cpu().detach().numpy()
-        print('forward pass complete! found vectors and width:', z1.shape, z2.shape, w.shape)
-        print('contact points of shape:', contact_pts.shape)
+        #print('forward pass complete! found vectors and width:', z1.shape, z2.shape, w.shape)
         base_dirs = z1/np.linalg.norm(z1)
         inner = np.einsum('ij, ij->i',base_dirs, z2)
         prod = base_dirs*inner[:, np.newaxis]
@@ -140,17 +137,13 @@ class ContactNet(nn.Module):
             grasps (6d grasps)
         '''
         success_idxs = torch.Tensor(labels_dict['success_idxs']).int().to(self.device)
-        print('success indices', success_idxs.shape, success_idxs)
         success_labels = np.array(labels_dict['success'])
         grasp_labels = labels_dict['grasps']
         width_labels = labels_dict['width']
-        print(success_labels[0])
-        print(pred_success[0])
         success_labels = success_labels.reshape(success_labels.shape[0], -1) #np.transpose(success_labels, axes=(0,2,1))
         
         success_labels = torch.Tensor(success_labels).to(self.device)
         
-        print('GRASP', pred_grasps.shape, grasp_labels.shape)
         # -- GRASP CONFIDENCE LOSS --
         # Use binary cross entropy loss on predicted success to find top-k preds with largest loss
         conf_loss_fn = nn.BCELoss().to(self.device)
@@ -234,13 +227,11 @@ class ContactNet(nn.Module):
             input_size += 3
             for r, mlp_layers in zip(r_list, mlp_list):
                 mlp_layers.insert(0, input_size)
-                print ('building SAnet', r, center, mlp_layers)
                 module = SAModule((center/num_points), r, MLP(mlp_layers)).to(self.device)
                 layer_modules.append(copy.deepcopy(module))
                 feat_cat_size += mlp_layers[-1] #keep track of how big the concatenated feature vector is for MSG
             num_points = center
             input_size = feat_cat_size
-            print(feat_cat_size)
             sa_modules.append(nn.ModuleList(copy.deepcopy(layer_modules)))
         #raise Exception
         return sa_modules
@@ -276,5 +267,4 @@ class ContactNet(nn.Module):
                                  nn.Dropout(p),
                                  nn.Conv1d(128, out_dim, 1)).to(self.device)
             head_list.append(head)
-        print('head list!!', head_list)
         return head_list

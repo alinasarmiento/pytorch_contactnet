@@ -58,9 +58,9 @@ class SAModule(torch.nn.Module):
     def forward(self, x, pos, batch, sample=True, idx=None):
         
         if sample==True:
-            print('now sampling farthest points for first module')
+            #print('now sampling farthest points for first module')
             idx = fps(pos, batch, ratio=self.ratio)
-            print('success')
+            #print('success')
         
         idx = fps(pos, batch, ratio=self.ratio)
         row, col = radius(pos, pos[idx], self.r, batch, batch[idx],

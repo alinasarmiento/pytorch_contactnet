@@ -423,7 +423,7 @@ def load_contact_grasps(contact_list, data_config):
         pos_idcs = np.where(all_contact_suc>0)[0]
         if len(pos_idcs) == 0:
             continue
-        print('total positive contact points ', len(pos_idcs))
+        #print('total positive contact points ', len(pos_idcs))
         all_pos_contact_points = all_contact_points[pos_idcs]
         all_pos_finger_diffs = all_finger_diffs[pos_idcs//2]
         all_pos_contact_dirs = all_contact_directions[pos_idcs]
@@ -431,7 +431,7 @@ def load_contact_grasps(contact_list, data_config):
         all_grasp_transform = all_grasp_transform[pos_idcs//2]
         
         # Use all positive contacts then mesh_utils with replacement
-        print(num_pos_contacts, len(all_pos_contact_points))
+        #print(num_pos_contacts, len(all_pos_contact_points))
         if num_pos_contacts > len(all_pos_contact_points)/2:
             pos_sampled_contact_idcs = np.arange(len(all_pos_contact_points))
             pos_sampled_contact_idcs_replacement = np.random.choice(np.arange(len(all_pos_contact_points)), num_pos_contacts*2 - len(all_pos_contact_points) , replace=True) 
@@ -497,7 +497,7 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
         dirs = np.zeros_like(pcd)
         approaches = np.zeros_like(pcd)
         widths = np.zeros([N, 1])
-        print('dirs shape', dirs.shape)
+        #print('dirs shape', dirs.shape)
         
         for label_index, index_list in enumerate(indices):
             #from IPython import embed

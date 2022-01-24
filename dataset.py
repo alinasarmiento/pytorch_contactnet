@@ -57,12 +57,15 @@ def extract_point_clouds(self, depth, K, segmap=None, rgb=None, z_range=[0.2,1.8
     return pc_full, pc_segments, pc_colors
 
 class ContactDataset(Dataset):
-    def __init__(self, data_path, data_config):
+    def __init__(self, data_path, data_config, overfit_test=True):
         self.data = []
         self.data_config = data_config
         data_path = os.fsencode(data_path)
         self.pcreader = data_utils.PointCloudReader(data_path, data_config['batch_size'], pc_augm_config=data_config['pc_augm'], depth_augm_config=data_config['depth_augm'])
         self.data = os.listdir(data_path)
+        self.overfit_test = overfit_test
+        if self.overfit_test:
+            self.pc_cam, self.pc_normals, self.camera_pose, self.depth, self.cam_mat = self.pcreader.render_random_scene(estimate_normals=True)
 
     def __getitem__(self, idx):
         data_file = self.data[idx]
@@ -78,9 +81,6 @@ class ContactDataset(Dataset):
         offsets = np.linalg.norm(np.subtract(contacts1, contacts2))
         '''
         contact_pts, grasp_poses, base_dirs, approach_dirs, offsets, idcs = data_utils.load_contact_grasps([scene_data], self.data_config)
-        print('in loader!')
-        print(contact_pts.shape)
-        print(grasp_poses.shape)
         gt_contact_info = {}
         gt_contact_info['contact_pts'] = contact_pts
         gt_contact_info['grasp_poses'] = grasp_poses
@@ -97,13 +97,14 @@ class ContactDataset(Dataset):
         obj_scales = scene_data['obj_scales']
         obj_transforms = scene_data['obj_transforms']
 
-        self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
-        pc_cam, pc_normals, camera_pose, depth, cam_mat = self.pcreader.render_random_scene(estimate_normals=True)
+        if self.overfit_test == False:
+            self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
+            self.pc_cam, self.pc_normals, self.camera_pose, self.depth, self.cam_mat = self.pcreader.render_random_scene(estimate_normals=True)
+       
+        pcd = self.pc_cam[:, :3]
+        pcd_normals = self.pc_normals[:, :3]
         
-        pcd = pc_cam[:, :3]
-        pcd_normals = pc_normals[:, :3]
-        
-        return pcd, pcd_normals, camera_pose, gt_contact_info
+        return pcd, pcd_normals, self.camera_pose, gt_contact_info
 
     def __len__(self):
         return len(self.data)

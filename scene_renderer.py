@@ -111,31 +111,40 @@ class SceneRenderer:
         """
         if (path, scale) in self._cache:
             return self._cache[(path, scale)]
-        obj = Object(path)
-        obj.rescale(scale)
+        if path.endswith('ob'):
+            path += 'j'
+        elif path.endswith('o'):
+            path += 'bj'
+        elif path.endswith('.'):
+            path += 'obj'
+        try:
+            obj = Object(path)
+            obj.rescale(scale)
+
+            tmesh = obj.mesh
+            tmesh_mean = np.mean(tmesh.vertices, 0)
+            tmesh.vertices -= np.expand_dims(tmesh_mean, 0)
+
+            lbs = np.min(tmesh.vertices, 0)
+            ubs = np.max(tmesh.vertices, 0)
+            object_distance = np.max(ubs - lbs) * 5
+
+            mesh = pyrender.Mesh.from_trimesh(tmesh)
+
+            context = {
+                'name': path + '_' + str(scale),
+                'tmesh': copy.deepcopy(tmesh), 
+                'distance': object_distance, 
+                'node': pyrender.Node(mesh=mesh, name=path + '_' + str(scale)),
+                'mesh_mean': np.expand_dims(tmesh_mean, 0),
+            }
+
+            self._cache[(path, scale)] = context
+
+            return self._cache[(path, scale)]
+        except(FileNotFoundError):
+            pass
         
-        tmesh = obj.mesh
-        tmesh_mean = np.mean(tmesh.vertices, 0)
-        tmesh.vertices -= np.expand_dims(tmesh_mean, 0)
-
-        lbs = np.min(tmesh.vertices, 0)
-        ubs = np.max(tmesh.vertices, 0)
-        object_distance = np.max(ubs - lbs) * 5
-
-        mesh = pyrender.Mesh.from_trimesh(tmesh)
-
-        context = {
-            'name': path + '_' + str(scale),
-            'tmesh': copy.deepcopy(tmesh), 
-            'distance': object_distance, 
-            'node': pyrender.Node(mesh=mesh, name=path + '_' + str(scale)),
-            'mesh_mean': np.expand_dims(tmesh_mean, 0),
-        }
-        
-        self._cache[(path, scale)] = context
-
-        return self._cache[(path, scale)]
-    
     def change_scene(self, obj_paths, obj_scales, obj_transforms):
         """Remove current objects and add new ones to the scene 
         Arguments:
@@ -153,7 +162,7 @@ class SceneRenderer:
             self._cache = {}
             
         for p,t,s in zip(obj_paths, obj_transforms, obj_scales):
-            print(p, t, s)
+            #print(p, t, s)
             object_context = self._load_object(p, s)
             object_context = deepcopy(object_context)
 
