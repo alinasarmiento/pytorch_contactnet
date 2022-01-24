@@ -29,7 +29,7 @@ def initialize_net(config_file):
     contactnet = ContactNet(config_dict, device).to(device)
     return contactnet, config_dict
 
-def train(model, config, train_loader, val_loader=None, epochs=1, save=True, save_pth=None):
+def train(model, config, train_loader, val_loader=None, epochs=1, save=True, save_pth=None, args=None):
     optimizer = torch.optim.Adam(model.parameters(), lr=config['train']['lr'])
     for epoch in range(epochs):
         # Train
@@ -46,7 +46,7 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
 
             optimizer.zero_grad()
             points, pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list, k=None)
-            base_dirs, width, success, approach_dirs = compute_labels(gt_dict['contact_pts'],
+            success_idxs, base_dirs, width, success, approach_dirs = compute_labels(gt_dict['contact_pts'],
                                                                       points,
                                                                       cam_poses,
                                                                       gt_dict['base_dirs'],
@@ -54,11 +54,12 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
                                                                       gt_dict['offsets'],
                                                                       config['data'])
             labels_dict = {}
+            labels_dict['success_idxs'] = success_idxs
             labels_dict['success'] = success
             labels_dict['grasps'] = gt_dict['grasp_poses']
             labels_dict['width'] = width
-            loss = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict)
-
+            loss = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict, args)
+            loss = loss[-1]
             loss.backward(retain_graph=True)
             optimizer.step()
             running_loss += loss
@@ -89,13 +90,14 @@ if __name__=='__main__':
     parser.add_argument('--config_path', type=str, default='./model/', help='path to config yaml file')
     parser.add_argument('--save_path', type=str, default='./checkpoints/model_save.pth', help='path to save file for main net')
     parser.add_argument('--data_path', type=str, default='/home/alinasar/acronym/scene_contacts', help='path to acronym dataset with Contact-GraspNet folder')
+    parser.add_argument('--root_path', type=str, default='/home/alinasar/pytorch_contactnet/', help='root path to repo')
     args = parser.parse_args()
 
     # initialize dataloaders
     #train_loader, val_loader = initialize_loaders(args.data_path)
     
-    contactnet, config = initialize_net(args.config_path)
+    contactnet, config= initialize_net(args.config_path)
     data_config = config['data']
     train_loader, val_loader = initialize_loaders(args.data_path, data_config)
 
-    train(contactnet, config, train_loader, val_loader, args.epochs, args.save_data, args.save_path)
+    train(contactnet, config, train_loader, val_loader, args.epochs, args.save_data, args.save_path, args)

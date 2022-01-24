@@ -39,7 +39,7 @@ class PoseStamped():
         self.header = header
 
 def pose_from_matrix(matrix, frame_id="world"):
-    quat = R.from_dcm(matrix[:3, :3]).as_quat()
+    quat = R.from_dcm(matrix[-1, :3, :3]).as_quat()
     trans = matrix[:-1, -1]
     pose = list(trans) + list(quat)
     pose = list2pose_stamped(pose, frame_id=frame_id)

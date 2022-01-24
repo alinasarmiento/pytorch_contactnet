@@ -490,6 +490,9 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
         dists, indices = knn_tree.query(gt_pcd, nsample, distance_upper_bound=radius) # M x k x 1
 
         indices -= N
+        indices = indices[:, 1]
+        # take out null indices
+        indices = np.delete(indices, np.where(indices==gt_pcd.shape[0]))
         # Create corresponding lists for baseline, approach, width, and binary success
         dirs = np.zeros_like(pcd)
         approaches = np.zeros_like(pcd)
@@ -503,13 +506,14 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
             approaches[index_list] = gt_appr[0, :][label_index]
             widths[index_list] = gt_width[0, :][label_index]
         success = np.where(widths>0, 1, 0)
-
+        #from IPython import embed
+        #embed()
         dir_labels.append(dirs)
         approach_labels.append(approaches)
         width_labels.append(widths)
         success_labels.append(success)
         
-    return [dir_labels, width_labels, success_labels, approach_labels]
+    return [indices, dir_labels, width_labels, success_labels, approach_labels]
 
 class PointCloudReader:
     """

@@ -91,7 +91,7 @@ data:
     gaussian_kernel: 0
   labels:
     num_pos_contacts: 50
-  k: 1
+  k: 2
   max_radius: 0.005
   filter_z: True
   z_val: -0.1
