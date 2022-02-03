@@ -61,8 +61,10 @@ class SAModule(torch.nn.Module):
             #print('now sampling farthest points for first module')
             idx = fps(pos, batch, ratio=self.ratio)
             #print('success')
-        
-        idx = fps(pos, batch, ratio=self.ratio)
+        else:
+            idx = idx
+
+        #idx = fps(pos, batch, ratio=self.ratio)
         row, col = radius(pos, pos[idx], self.r, batch, batch[idx],
                           max_num_neighbors=64)
         edge_index = torch.stack([col, row], dim=0)

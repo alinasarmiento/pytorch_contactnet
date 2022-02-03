@@ -31,6 +31,7 @@ def initialize_net(config_file):
 
 def train(model, config, train_loader, val_loader=None, epochs=1, save=True, save_pth=None, args=None):
     optimizer = torch.optim.Adam(model.parameters(), lr=config['train']['lr'])
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200)
     for epoch in range(epochs):
         # Train
         model.train()
@@ -44,28 +45,35 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
             batch_list = batch_list.view(-1).long().to(model.device)
             pcd = scene_pcds.view(-1, data_shape[2]).to(model.device)
 
+            grasp_poses = gt_dict['grasp_poses'] #currently in the wrong shape, need to expand and rebatch for label computation
+            grasp_poses = grasp_poses[0].view(data_shape[0], -1, 4, 4) # B x num_label_points x 4 x 4
+            
             optimizer.zero_grad()
             points, pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list, k=None)
-            success_idxs, base_dirs, width, success, approach_dirs = compute_labels(gt_dict['contact_pts'],
-                                                                      points,
-                                                                      cam_poses,
-                                                                      gt_dict['base_dirs'],
-                                                                      gt_dict['approach_dirs'],
-                                                                      gt_dict['offsets'],
-                                                                      config['data'])
+            grasp_poses, success_idxs, base_dirs, width, success, approach_dirs = compute_labels(gt_dict['contact_pts'],
+                                                                                    points,
+                                                                                    cam_poses,
+                                                                                    gt_dict['base_dirs'],
+                                                                                    gt_dict['approach_dirs'],
+                                                                                    gt_dict['offsets'],
+                                                                                    grasp_poses,
+                                                                                    config['data'])
             labels_dict = {}
             labels_dict['success_idxs'] = success_idxs
             labels_dict['success'] = success
-            labels_dict['grasps'] = gt_dict['grasp_poses']
+            labels_dict['grasps'] = grasp_poses
             labels_dict['width'] = width
-            loss = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict, args)
-            loss = loss[-1]
+            loss_list = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict, args)
+            loss = loss_list[-1]
             loss.backward(retain_graph=True)
             optimizer.step()
+            scheduler.step()
             running_loss += loss
             
-            if i%1 == 0:
+            if i%10 == 0:
                 print('[Epoch: %d, Batch: %4d / %4d], Train Loss: %.3f' % (epoch + 1, (i) + 1, len(train_loader), running_loss/10))
+                #print('CONF', loss_list[0].item(), 'ADD-S', loss_list[1].item(), 'WIDTH', loss_list[2].item())
+                #print(pred_successes)
                 running_loss = 0.0
 
         # Validation

@@ -142,7 +142,7 @@ class SceneRenderer:
             self._cache[(path, scale)] = context
 
             return self._cache[(path, scale)]
-        except(FileNotFoundError):
+        except(BadZipFile, FileNotFoundError):
             pass
         
     def change_scene(self, obj_paths, obj_scales, obj_transforms):

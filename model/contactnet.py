@@ -33,8 +33,8 @@ class ContactNet(nn.Module):
         Returns
             list of grasps (4x4 numpy arrays)
         '''
-        
-        sample_pts = input_pcd
+
+        sample_pts = input_pcd.float()
         if k is not None:
             sample_pts = utils.farthest_point_downsample(input_pcd, k)
         input_list = (sample_pts, pos, batch)
@@ -49,7 +49,7 @@ class ContactNet(nn.Module):
                     feat, pos, batch, idx = module(*input_list)
                 else:
                     feat, pos, batch, idx = module(*input_list, sample=False, idx=idx)
-                
+                #print(idx[0])
                 feature_cat = torch.cat((feature_cat, feat), 1)
             
             input_list = (feature_cat, pos, batch)
@@ -89,7 +89,6 @@ class ContactNet(nn.Module):
 
         s = s.view(scalar_shape).to(self.device)
         w = w.view(scalar_shape).to(self.device)
-        
         
         return points, final_grasps, s, w
         
@@ -136,7 +135,7 @@ class ContactNet(nn.Module):
             success (boolean)
             grasps (6d grasps)
         '''
-        success_idxs = torch.Tensor(labels_dict['success_idxs']).int().to(self.device)
+        success_idxs = labels_dict['success_idxs']
         success_labels = np.array(labels_dict['success'])
         grasp_labels = labels_dict['grasps']
         width_labels = labels_dict['width']
@@ -151,44 +150,85 @@ class ContactNet(nn.Module):
 
         # -- GEOMETRIC LOSS --
         # Turn each gripper control point into a pose object
-        gripper_object = mesh_utils.create_gripper('panda', root_folder=args.root_path)
-        gripper_np = gripper_object.get_control_point_tensor(1)[0, :]
+
+        '''
         gripper_poses = []
         for point in gripper_np:
             pt_pose = utils.list2pose_stamped(np.concatenate((point, [0, 0, 0, 1]), 0))
             pt_pose = utils.matrix_from_pose(pt_pose)
             gripper_poses.append(pt_pose)
-
-        # Find positive grasp labels and corresponding predictions
-        grasp_labels = grasp_labels.view(grasp_labels.shape[0], -1, 4, 4).to(self.device)
-        pos_labels = torch.index_select(grasp_labels, 1, success_idxs)
-        pos_pred = torch.index_select(pred_grasps, 1, success_idxs)
-        from IPython import embed
-        #embed()
+        gripper_poses = np.array(gripper_poses)
+        gripper_poses = torch.Tensor(gripper_poses).to(self.device)
+        '''
         
-        # Turn positive predicted grasp labels into gripper control points
-        label_control_points = []
-        pred_control_points = []
-        for batch in range(grasp_labels.shape[0]):
-            for i in range(len(pos_labels)):
-                pred_pose = pos_pred[batch][i].cpu().detach().numpy()
-                label_pose = pos_labels[batch][i].cpu().detach().numpy()
-                pred_pts = []
-                label_pts = []
-                # Convert each point in the gripper control points to the predicted and label poses
-                for pt_pose in gripper_poses:
-                    pred_pt = np.matmul(pred_pose, pt_pose)
-                    pred_pts.append([pred_pt[0, -1], pred_pt[1, -1], pred_pt[2, -1]])
-                    label_pt = np.matmul(label_pose, pt_pose)
-                    label_pts.append([label_pt[0, -1], label_pt[1, -1], label_pt[2, -1]])
-                pred_control_points.append(pred_pts)
-                label_control_points.append(label_pts)
+        # Find positive grasp labels and corresponding predictions
+        grasp_labels = grasp_labels.float().to(self.device) #.view(grasp_labels.shape[0], -1, 4, 4).to(self.device)
+        pos_label_list = []
+        pos_pred_list = []
+        print('grasp labels', grasp_labels.shape)
+        # pos_pred - list of predicted grasp poses for positively labeled contact points
+        # pos_labels - list of labeled grasp poses for positively labeled contact points
 
-        pred_control_points = np.stack(pred_control_points)
-        label_control_points = np.stack(label_control_points)
+        for batch, idx_list in enumerate(success_idxs):
+            idx_list = idx_list.T
+            point_idxs = idx_list[0]
+            label_idxs = idx_list[1]
+            from IPython import embed
+            embed()
+            pos_labels = grasp_labels[batch, label_idxs, :4, :4]
+            # !! pos_labels[batch, point_idxs, :4, :4] = grasp_labels[0, label_idxs, :4, :4]
+            pos_pred = pred_grasps[batch, point_idxs, :4, :4]
+
+            pos_label_list.append(pos_labels)
+            pos_pred_list.append(pos_pred)
+
+        label_pts_list = []
+        pred_pts_list = []
+
+        gripper_object = mesh_utils.create_gripper('panda', root_folder=args.root_path)
+
+        for pos_labels, pos_pred in zip(pos_label_list, pos_pred_list):
+
+            gripper_np = gripper_object.get_control_point_tensor(pos_labels.shape[0])
+            sym_gripper_np = gripper_object.get_control_point_tensor(pos_labels.shape[0], symmetric=True)
+            hom = np.ones((gripper_np.shape[0], gripper_np.shape[1], 1))
+            gripper_pts = torch.Tensor(np.concatenate((gripper_np, hom), 2)).transpose(1,2).to(self.device)
+            sym_gripper_pts = torch.Tensor(np.concatenate((sym_gripper_np, hom), 2)).transpose(1,2).to(self.device)
+            
+            label_pts = torch.matmul(pos_labels, gripper_pts).transpose(1,2)
+            sym_label_pts = torch.matmul(pos_labels, sym_gripper_pts).transpose(1,2)
+            
+            pred_pts = torch.matmul(pos_pred, gripper_pts).transpose(1,2)
+
+            
+            label_pts_list.append([label_pts, sym_label_pts])
+            pred_pts_list.append(pred_pts)
+
         # Compare symmetric predicted and label control points to calculate "add-s" loss
-        add_s_loss = pred_success*(np.min(np.linalg.norm(pred_control_points - label_control_points), 0))
-        add_s_loss = torch.mean(add_s_loss).to(self.device)
+        for pred_pts, label_pts in zip(pred_pts_list, label_pts_list):
+
+            pred_pts = pred_pts[:, :, :3]
+            label_pts_1 = label_pts[0][:, :, :3]
+            label_pts_2 = label_pts[1][:, :, :3]
+            
+            np.save('control_label_pts', torch.flatten(label_pts_1, start_dim=0, end_dim=1).cpu().numpy())
+            
+            norm_1 = torch.linalg.vector_norm((pred_pts - label_pts_1), dim=(1,2))
+            norm_2 = torch.linalg.vector_norm((pred_pts - label_pts_2), dim=(1,2))
+            min_norm = torch.min(norm_1, norm_2)
+            #add_s_loss = pred_
+            
+            #pred_pts = pred_pts[:, :, :3, -1]  # N x 5 x 3
+            #label_pts = torch.unsqueeze(label_pts[:, :, :3, -1], 1)
+            #v = pred_pts.shape[1] # number of key points provided by gripper control tensor (5)
+            #label_pts_rp = label_pts.repeat(1, v, 1, 1)
+            #pred_pts_rp = pred_pts.repeat(v, 1, 1, 1).transpose(0, 1).transpose(1, 2)
+            
+            #from IPython import embed
+            #embed()
+            
+            add_s_loss = pred_success*(torch.min(torch.linalg.norm(pred_pts - label_pts), 0))
+            add_s_loss = torch.mean(add_s_loss).to(self.device)
         
         # -- APPROACH AND BASELINE LOSSES --
         # currently not used
@@ -205,7 +245,7 @@ class ContactNet(nn.Module):
         #embed()
         width_loss = raw_width_loss #np.mean(masked_width_loss)
 
-        total_loss = self.config['loss']['conf_mult']*conf_loss + self.config['loss']['add_s_mult']*add_s_loss + self.config['loss']['width_mult']*width_loss
+        total_loss = self.config['loss']['conf_mult']*conf_loss + self.config['loss']['add_s_mult']*add_s_loss*0 + self.config['loss']['width_mult']*width_loss*0
     
         return conf_loss, add_s_loss, width_loss, total_loss #, approach_loss, baseline_loss
         

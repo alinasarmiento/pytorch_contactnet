@@ -91,12 +91,12 @@ data:
     gaussian_kernel: 0
   labels:
     num_pos_contacts: 1000
-  k: 10
-  max_radius: 0.005
+  k: 2
+  max_radius: .1
   filter_z: True
   z_val: -0.1
   batch_size: 2
   num_points: 2048
 train:
-  lr: 0.005
+  lr: 0.1
 
