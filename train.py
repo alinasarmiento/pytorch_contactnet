@@ -32,6 +32,7 @@ def initialize_net(config_file):
 def train(model, config, train_loader, val_loader=None, epochs=1, save=True, save_pth=None, args=None):
     optimizer = torch.optim.Adam(model.parameters(), lr=config['train']['lr'])
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200)
+    torch.autograd.set_detect_anomaly(True)
     for epoch in range(epochs):
         # Train
         model.train()
@@ -47,10 +48,16 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
 
             grasp_poses = gt_dict['grasp_poses'] #currently in the wrong shape, need to expand and rebatch for label computation
             grasp_poses = grasp_poses[0].view(data_shape[0], -1, 4, 4) # B x num_label_points x 4 x 4
+
+            #from IPython import embed
+            #embed()
             
             optimizer.zero_grad()
             points, pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list, k=None)
-            grasp_poses, success_idxs, base_dirs, width, success, approach_dirs = compute_labels(gt_dict['contact_pts'],
+            gt_points = gt_dict['contact_pts']
+            pcd_shape_batched = (gt_points.shape[0], gt_points.shape[2]//gt_points.shape[0], -1)
+            gt_points = gt_points[0].view(pcd_shape_batched).to(model.device)
+            grasp_poses, success_idxs, base_dirs, width, success, approach_dirs = compute_labels(gt_points,
                                                                                     points,
                                                                                     cam_poses,
                                                                                     gt_dict['base_dirs'],
@@ -65,7 +72,7 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
             labels_dict['width'] = width
             loss_list = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict, args)
             loss = loss_list[-1]
-            loss.backward(retain_graph=True)
+            loss.backward() #retain_graph=True)
             optimizer.step()
             scheduler.step()
             running_loss += loss

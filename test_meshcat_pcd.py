@@ -46,7 +46,9 @@ def meshcat_pcd_show(mc_vis, point_cloud, color=None, name=None):
 
 gt_pcd = np.load('gt_pcd.npy')
 obs_pcd = np.load('obs_pcd.npy')
-control_label_pcd = np.load('control_label_pts.npy')    
+control_label_pcd = np.load('control_pt.npy')    
+test_pcd = np.load('6d_grasp_building.npy')
+
 vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
 vis['scene'].delete()
 print('MeshCat URL: %s' % vis.url())
@@ -57,6 +59,7 @@ print(obs_color)
 meshcat_pcd_show(vis, gt_pcd,  name='scene/obs')
 meshcat_pcd_show(vis, obs_pcd, name='scene/gt')
 meshcat_pcd_show(vis, control_label_pcd, name='scene/control_pts')
+meshcat_pcd_show(vis, test_pcd, name='scene/6d_grasp')
 '''
 pth = os.path.join('/home/alinasar/acronym/', 'acronym_tools/acronym/data/examples/meshes/Mug/10f6e09036350e92b3f21f1137c3c347.obj')#'models/3b9309c9089549a14ddfc542c04e0efc.obj')
 print(pth)
