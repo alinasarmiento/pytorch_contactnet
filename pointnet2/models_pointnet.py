@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import torch
 from torch.nn import Sequential as Seq, Linear as Lin, ReLU, BatchNorm1d as BN
 import yaml
+import copy
+import numpy as np
 
 class FPModule(torch.nn.Module):
     def __init__(self, k, nn):
@@ -56,11 +58,12 @@ class SAModule(torch.nn.Module):
         self.conv = PointConv(nn)
 
     def forward(self, x, pos, batch, sample=True, idx=None):
-        
+        check = copy.deepcopy(pos)
+        np.save('pts_check', check.cpu().numpy())
+
         if sample==True:
             #print('now sampling farthest points for first module')
             idx = fps(pos, batch, ratio=self.ratio)
-            #print('success')
         else:
             idx = idx
 

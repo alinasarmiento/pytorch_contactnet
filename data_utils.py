@@ -436,7 +436,6 @@ def load_contact_grasps(contact_list, data_config):
         all_grasp_transform = all_grasp_transform[pos_idcs//2]
         
         # Use all positive contacts then mesh_utils with replacement
-        #print(num_pos_contacts, len(all_pos_contact_points))
         if num_pos_contacts > len(all_pos_contact_points)/2:
             pos_sampled_contact_idcs = np.arange(len(all_pos_contact_points))
             pos_sampled_contact_idcs_replacement = np.random.choice(np.arange(len(all_pos_contact_points)), num_pos_contacts*2 - len(all_pos_contact_points) , replace=True) 
@@ -803,6 +802,7 @@ class PointCloudReader:
         # 0.005 s
         rgb, depth, _, camera_pose = self._renderer.render(in_camera_pose, render_pc=False)
         depth = self._augment_depth(depth)
+
         #imageio.imwrite('depth.png', depth)
         #imageio.imwrite('rgb.png', rgb)
         #from IPython import embed

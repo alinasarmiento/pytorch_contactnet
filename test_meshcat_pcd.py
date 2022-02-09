@@ -44,10 +44,24 @@ def meshcat_pcd_show(mc_vis, point_cloud, color=None, name=None):
             g.PointsMaterial()
     ))
 
+def sample_grasp_show(mc_vis, pose_list, idx=None, name=None):
+    """
+    shows a sample grasp as represented by a bounding box
+    """
+    if name is None:
+        name = 'scene/box'
+    if idx is None:
+        idx = 0
+    sampled_pose = pose_list[idx]
+    mc_vis[name].set_object(g.Box([0.1, 0.1, 0.1]))
+    mc_vis[name].set_transform(sampled_pose)
+    
 gt_pcd = np.load('gt_pcd.npy')
 obs_pcd = np.load('obs_pcd.npy')
-control_label_pcd = np.load('control_pt.npy')    
+control_label_pcd = np.load('control_pt_1.npy')    
 test_pcd = np.load('6d_grasp_building.npy')
+control_2 = np.load('control_pt_2.npy')
+first_pcd = np.load('first_pcd.npy')
 
 vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
 vis['scene'].delete()
@@ -56,10 +70,12 @@ print('MeshCat URL: %s' % vis.url())
 obs_color = np.zeros_like(obs_pcd)
 obs_color[:, 0] = 255*np.ones_like(obs_pcd)[:, 0]
 print(obs_color)
-meshcat_pcd_show(vis, gt_pcd,  name='scene/obs')
-meshcat_pcd_show(vis, obs_pcd, name='scene/gt')
+meshcat_pcd_show(vis, gt_pcd,  name='scene/gt')
+meshcat_pcd_show(vis, obs_pcd, name='scene/obs')
 meshcat_pcd_show(vis, control_label_pcd, name='scene/control_pts')
 meshcat_pcd_show(vis, test_pcd, name='scene/6d_grasp')
+meshcat_pcd_show(vis, control_2, name='scene/control_pts_2')
+meshcat_pcd_show(vis, first_pcd, name='scene/first_pcd')
 '''
 pth = os.path.join('/home/alinasar/acronym/', 'acronym_tools/acronym/data/examples/meshes/Mug/10f6e09036350e92b3f21f1137c3c347.obj')#'models/3b9309c9089549a14ddfc542c04e0efc.obj')
 print(pth)

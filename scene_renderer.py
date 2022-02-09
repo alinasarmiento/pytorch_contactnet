@@ -203,7 +203,7 @@ class SceneRenderer:
 
             x = mask[1]
             y = mask[0]
-            
+
             normalized_x = (x.astype(np.float32) - width * 0.5) / width
             normalized_y = (y.astype(np.float32) - height * 0.5) / height
         

@@ -48,9 +48,6 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
 
             grasp_poses = gt_dict['grasp_poses'] #currently in the wrong shape, need to expand and rebatch for label computation
             grasp_poses = grasp_poses[0].view(data_shape[0], -1, 4, 4) # B x num_label_points x 4 x 4
-
-            #from IPython import embed
-            #embed()
             
             optimizer.zero_grad()
             points, pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list, k=None)

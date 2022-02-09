@@ -34,6 +34,7 @@ class ContactNet(nn.Module):
         Returns
             list of grasps (4x4 numpy arrays)
         '''
+        np.save('first_pcd', pos.cpu().numpy())
         sample_pts = input_pcd.float()
         if k is not None:
             sample_pts = utils.farthest_point_downsample(input_pcd, k)
@@ -47,12 +48,15 @@ class ContactNet(nn.Module):
                 
                 if i==0:    
                     feat, pos, batch, idx = module(*input_list)
+                    
                 else:
                     feat, pos, batch, idx = module(*input_list, sample=False, idx=idx)
+                    np.save('pts_check', pos.cpu().numpy())
                 feature_cat = torch.cat((feature_cat, feat), 1)
             
             input_list = (feature_cat, pos, batch)
             skip_layers.insert(0, input_list)
+            
 
         for module, skip in zip(self.feat_prop, skip_layers):
             #print('MODULE FEAT PROP')
@@ -60,6 +64,7 @@ class ContactNet(nn.Module):
         point_features =  input_list[0]  #pointwise features
         
         points = input_list[1]
+        
         point_features = torch.cat((points, point_features), 1)
         point_features = torch.unsqueeze(point_features, 0)
         point_features = point_features.transpose(1, 2)
@@ -81,8 +86,10 @@ class ContactNet(nn.Module):
         scalar_shape = (num_batches, input_list[1].shape[0]//num_batches)
         points = input_list[1].view(pts_shape).to(self.device)
         final_grasps = final_grasps.view(grasp_shape).to(self.device)
-        s = torch.sigmoid(s)
-        w = torch.sigmoid(w)
+        success_sigmoid = nn.Sigmoid()
+        width_sigmoid = nn.Sigmoid()
+        s = success_sigmoid(s).to(self.device)
+        w = width_sigmoid(w).to(self.device)
 
         s = s.view(scalar_shape).to(self.device)
         w = w.view(scalar_shape).to(self.device)
@@ -192,6 +199,11 @@ class ContactNet(nn.Module):
             label_pts_list.append([label_pts, sym_label_pts])
             pred_pts_list.append(pred_pts)
 
+
+        pred_pts1 = pred_pts_list[0][:,:,:3]
+        pred_pts2 = pred_pts_list[1][:,:,:3]
+        np.save('control_pt_1', torch.flatten(pred_pts1.detach(), start_dim=0, end_dim=1).cpu().numpy())
+        np.save('control_pt_2', torch.flatten(pred_pts2.detach(), start_dim=0, end_dim=1).cpu().numpy())
         # Compare symmetric predicted and label control points to calculate "add-s" loss
         for success_idx, pred_success_list, pred_pts, label_pts in zip(success_idxs, pred_success, pred_pts_list, label_pts_list):
             point_success_mask = success_idx[:, 0]
@@ -200,8 +212,6 @@ class ContactNet(nn.Module):
             label_pts_2 = label_pts[1][:, :, :3]
             
             pred_success_masked = pred_success_list[point_success_mask]
-
-            #np.save('control_pt', torch.flatten(pred_pts.detach(), start_dim=0, end_dim=1).cpu().numpy())
             
             norm_1 = torch.linalg.vector_norm((pred_pts - label_pts_1), dim=(1,2))
             norm_2 = torch.linalg.vector_norm((pred_pts - label_pts_2), dim=(1,2))
@@ -254,7 +264,6 @@ class ContactNet(nn.Module):
             num_points = center
             input_size = feat_cat_size
             sa_modules.append(nn.ModuleList(copy.deepcopy(layer_modules)))
-        #raise Exception
         return sa_modules
         
     def FPnet(self, cfg):

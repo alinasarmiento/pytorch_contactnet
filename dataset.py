@@ -89,10 +89,7 @@ class ContactDataset(Dataset):
             filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
             self.overfit_scene = load(filename)
             self.gt_contact_info = self.get_contact_info([self.overfit_scene])
-            
-            self.pc_cam, self.pc_normals, self.camera_pose, self.depth, self.cam_mat = self.pcreader.render_random_scene(estimate_normals=True)
-            #print(self.camera_pose)
-            
+                        
     def get_contact_info(self, scene):
         contact_pts, grasp_poses, base_dirs, approach_dirs, offsets, idcs = data_utils.load_contact_grasps(scene, self.data_config)
         gt_contact_info = {}
@@ -133,15 +130,16 @@ class ContactDataset(Dataset):
         self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
         self.pc_cam, self.pc_normals, self.camera_pose, self.depth, self.cam_ori = self.pcreader.render_random_scene(estimate_normals=True)
 
+        '''
         pcd_mean = np.mean(self.pc_cam, axis=0)
         pcd_cam_cent = self.pc_cam - pcd_mean
         pcd_cam_cent_rot = np.matmul(self.camera_pose[:-1, :-1], pcd_cam_cent.T).T
         y_rot_mat = R.from_euler('xyz', [0, np.pi, 0]).as_matrix()
         z_rot_mat = R.from_euler('xyz', [0, 0, np.pi/2]).as_matrix()
         pcd_world = pcd_cam_cent_rot + pcd_mean
-
+        
         # pcd_world = pcd_cam_cent_rot + self.camera_pose[:-1, -1] + pcd_mean
-        '''
+        
         rand_pt = [0, 0, 0]
         # self.pc, _ = crop_pcd(pcd_world, rand_pt, 'obs_pcd')
         self.pc, _ = crop_pcd(pcd_cam_cent_rot, rand_pt, 'obs_pcd')
