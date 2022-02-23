@@ -4,6 +4,7 @@ import meshcat.transformations as tf
 import numpy as np
 import os
 import time
+import argparse
 
 def scale_matrix(factor, origin=None):
     """Return matrix to scale by factor around origin in direction.
@@ -44,50 +45,76 @@ def meshcat_pcd_show(mc_vis, point_cloud, color=None, name=None):
             g.PointsMaterial()
     ))
 
-def sample_grasp_show(mc_vis, pose_list, idx=None, name=None):
+def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
     """
     shows a sample grasp as represented by a bounding box
     """
     if name is None:
-        name = 'scene/box'
-    if idx is None:
-        idx = 0
-    sampled_pose = pose_list[idx]
-    mc_vis[name].set_object(g.Box([0.1, 0.1, 0.1]))
-    mc_vis[name].set_transform(sampled_pose)
+        name = 'scene/loop/'
+    for i, gripper in enumerate(control_pt_list):
+        color = np.zeros_like(gripper) * 255
+        wrist = gripper[[1, 0, 2], :]
+        wrist = np.transpose(wrist, axes=(1,0))
+        
+        gripper = gripper[1:,:]
+        gripper = gripper[[2, 0, 1, 3], :]
+        gripper = np.transpose(gripper, axes=(1,0))
+        
+        name_i = 'pose'+str(i)
+        if i%freq == 0:
+            mc_vis[name+name_i].set_object(g.Line(g.PointsGeometry(gripper)))
+            #mc_vis[name_i+'wrist'].set_object(g.Line(g.PointsGeometry(wrist)))
+
+def visualize(args):
+    gt_pcd = np.load('gt_pcd.npy')
+    obs_pcd = np.load('obs_pcd.npy')
+    first_pcd = np.load('first_pcd.npy')
+    pos_pcd = np.load('pos_pts.npy')
+    pos_labeled = np.load('pos_labeled_pcd.npy')
+    success = np.load('success_tensor.npy')
+    print(np.max(success))
+    control_expanded = np.load('control_pt_list.npy')
+    label_expanded = np.load('label_pt_list.npy')
+    s_grasp_expanded = np.load('success_pt_list.npy')
+    vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
+    vis['scene'].delete()
+    print('MeshCat URL: %s' % vis.url())
     
-gt_pcd = np.load('gt_pcd.npy')
-obs_pcd = np.load('obs_pcd.npy')
-control_label_pcd = np.load('control_pt_1.npy')    
-test_pcd = np.load('6d_grasp_building.npy')
-control_2 = np.load('control_pt_2.npy')
-first_pcd = np.load('first_pcd.npy')
+    if args.single_grasp:
+        print(control_expanded.shape)
+        index = np.random.randint(0, len(control_expanded))
+        grasp = control_expanded[index]
+        contact_point = first_pcd[index]
+        print(first_pcd.shape)
+        print(grasp)
+        print(contact_point)
 
-vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
-vis['scene'].delete()
-print('MeshCat URL: %s' % vis.url())
+    pred_s = np.reshape(np.argwhere(success > 0.4), (-1))
 
-obs_color = np.zeros_like(obs_pcd)
-obs_color[:, 0] = 255*np.ones_like(obs_pcd)[:, 0]
-print(obs_color)
-meshcat_pcd_show(vis, gt_pcd,  name='scene/gt')
-meshcat_pcd_show(vis, obs_pcd, name='scene/obs')
-meshcat_pcd_show(vis, control_label_pcd, name='scene/control_pts')
-meshcat_pcd_show(vis, test_pcd, name='scene/6d_grasp')
-meshcat_pcd_show(vis, control_2, name='scene/control_pts_2')
-meshcat_pcd_show(vis, first_pcd, name='scene/first_pcd')
-'''
-pth = os.path.join('/home/alinasar/acronym/', 'acronym_tools/acronym/data/examples/meshes/Mug/10f6e09036350e92b3f21f1137c3c347.obj')#'models/3b9309c9089549a14ddfc542c04e0efc.obj')
-print(pth)
-pth2 = os.path.join('/home/alinasar/acronym/acronym_tools/acronym/', 'data/franka_gripper_collision_mesh.stl')
-geom = g.ObjMeshGeometry.from_file(pth)
-gripper = g.StlMeshGeometry.from_file(pth2)
-#print(geom.contents)
-vis['scene/object'].set_object(geom)
-vis['scene/gripper'].set_object(gripper)
-for theta in np.linspace(0, 2 * np.pi, 200):
-    vis.set_transform(tf.rotation_matrix(theta, [0, 0, 1]))
-    time.sleep(0.005)
+    pred_s_pcd = first_pcd[pred_s]
+    print(pred_s_pcd.shape)
 
-#vis['scene/object'].set_transform(scale_matrix(0.001))
-'''
+    obs_color = np.zeros_like(pos_pcd)
+    obs_color[:, 0] = 255*np.ones_like(pos_pcd)[:, 0]
+    green_color = np.zeros_like(pos_labeled)
+    green_color[:, 1] = 255*np.ones_like(pos_labeled)[:, 1]
+    white_color = 255*np.ones_like(pred_s_pcd)
+
+    sample_grasp_show(vis, control_expanded, name='scene/control_loops/')
+    sample_grasp_show(vis, label_expanded, name='scene/label_gripper/')
+    sample_grasp_show(vis, s_grasp_expanded, name='scene/success_masked/', freq=100)
+    #meshcat_pcd_show(vis, gt_pcd,  name='scene/gt')
+    #meshcat_pcd_show(vis, obs_pcd, name='scene/obs')
+    #meshcat_pcd_show(vis, control_label_pcd, name='scene/control_pts')
+    #meshcat_pcd_show(vis, control_2, name='scene/control_pts_2')
+    meshcat_pcd_show(vis, first_pcd, name='scene/first_pcd')
+    #meshcat_pcd_show(vis, pred_s_pcd, name='scene/pred_s') #, color=white_color)
+    #meshcat_pcd_show(vis, pos_pcd, name='scene/pos_pcd', color=obs_color.T)
+    #meshcat_pcd_show(vis, pos_labeled, name='scene/pos_labeled', color=green_color.T)
+    
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--single_grasp', type=bool, default=False, help='load a single grasp with contact point emphasized')
+    args = parser.parse_args()
+    
+    visualize(args)

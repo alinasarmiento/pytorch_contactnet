@@ -9,7 +9,6 @@ from scipy.spatial import KDTree, cKDTree
 from scipy.spatial.transform import Rotation as R
 
 def get_dataloader(data_path, data_config=None):
-    #data_path = os.path.join(os.getcwd(), data_path)
     dataset = ContactDataset(data_path, data_config)
     dataloader = DataLoader(dataset, batch_size=data_config['batch_size'])
     return dataloader
@@ -85,10 +84,11 @@ class ContactDataset(Dataset):
         self.data = os.listdir(data_path)
         self.overfit_test = overfit_test
         if self.overfit_test:
-            data_file = self.data[0]
+            data_file = self.data[1]
             filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
             self.overfit_scene = load(filename)
             self.gt_contact_info = self.get_contact_info([self.overfit_scene])
+            self.pc_cam, self.pc_normals, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True)
                         
     def get_contact_info(self, scene):
         contact_pts, grasp_poses, base_dirs, approach_dirs, offsets, idcs = data_utils.load_contact_grasps(scene, self.data_config)
@@ -128,7 +128,7 @@ class ContactDataset(Dataset):
         
         #if not self.overfit_test:
         self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
-        self.pc_cam, self.pc_normals, self.camera_pose, self.depth, self.cam_ori = self.pcreader.render_random_scene(estimate_normals=True)
+        self.pc_cam, self.pc_normals, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True, camera_pose=self.camera_pose)
 
         '''
         pcd_mean = np.mean(self.pc_cam, axis=0)

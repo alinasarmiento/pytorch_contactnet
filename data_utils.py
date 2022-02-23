@@ -10,6 +10,7 @@ import torch
 import imageio
 from scipy.spatial.transform import Rotation as R
 sys.path.append('model/')
+import copy
 
 def load_scene_contacts(dataset_folder, test_split_only=False, num_test=None, scene_contacts_path='scene_contacts_new'):
     """
@@ -471,95 +472,94 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
     Returns:
         [dir_labels_pc_cam, offset_labels_pc, grasp_success_labels_pc, approach_labels_pc_cam] -- Per-point contact success labels and per-contact pose labels in rendered point cloud
     """
-    nsample = data_config['k']
-    radius = 0.005 #data_config['max_radius']
-    filter_z = data_config['filter_z']
-    z_val = data_config['z_val']
-    b, N = data_config['batch_size'], obs_pcds.shape[1]#data_config['num_points']
-    pos_contact_pts_mesh = pos_contact_pts_mesh.reshape(b, -1, 3)
-    dir_labels = []
-    approach_labels = []
-    width_labels = []
-    success_labels = []
-    label_idxs = []
-    pose_labels = []
-    for pcd_torch, cam_pose, gt_pcd_torch, gt_pose, gt_dir, gt_appr, gt_width in zip(obs_pcds, cam_poses, pos_contact_pts_mesh, grasp_poses, pos_contact_dirs, pos_contact_approaches, pos_finger_diffs):
-        gt_pcd = copy.deepcopy(gt_pcd_torch).cpu().detach().numpy()
-        pcd = copy.deepcopy(pcd_torch).cpu().detach().numpy()
+    with torch.no_grad():
+        nsample = data_config['k']
+        radius = data_config['max_radius']
+        filter_z = data_config['filter_z']
+        z_val = data_config['z_val']
+        b, N = data_config['batch_size'], obs_pcds.shape[1] #data_config['num_points']
+        pos_contact_pts_mesh = pos_contact_pts_mesh.reshape(b, -1, 3)
+        dir_labels = []
+        approach_labels = []
+        width_labels = []
+        success_labels = []
+        label_idxs = []
+        pose_labels = []
+        for pcd, cam_pose, gt_pcd, gt_pose, gt_dir, gt_appr, gt_width in zip(obs_pcds, cam_poses, pos_contact_pts_mesh, grasp_poses, pos_contact_dirs, pos_contact_approaches, pos_finger_diffs):
+            #gt_pcd = copy.deepcopy(gt_pcd_torch).cpu().detach().numpy()
+            #pcd = copy.deepcopy(pcd_torch).cpu().detach().numpy()
 
-        # Convert ground truth point cloud to camera frame
-        x_rot_mat = R.from_euler('xyz', [np.pi, 0, 0]).as_matrix()
-        gt_pcd = np.concatenate((gt_pcd, np.ones((gt_pcd.shape[0], 1))), 1)
-        gt_pcd_cam = np.matmul(gt_pcd, np.linalg.inv(cam_pose).T)[:, :3]
-        gt_pcd_cam = np.matmul(x_rot_mat, gt_pcd_cam.T).T
-        
-        # Convert ground truth grasp vectors (approach and baseline) to camera frame
+            # Convert ground truth point cloud to camera frame
+            x_rot_mat = R.from_euler('xyz', [np.pi, 0, 0]).as_matrix()
+            gt_pcd = np.concatenate((gt_pcd, np.ones((gt_pcd.shape[0], 1))), 1)
+            gt_pcd_cam = np.matmul(gt_pcd, np.linalg.inv(cam_pose).T)[:, :3]
+            gt_pcd_cam = np.matmul(x_rot_mat, gt_pcd_cam.T).T
+            np.save('pos_pts', gt_pcd_cam)
+            # Convert ground truth grasp vectors (approach and baseline) to camera frame
 
-        gt_dir = np.concatenate((gt_dir[0], np.zeros((gt_dir[0].shape[0], 1))), 1)
-        gt_dir = np.matmul(gt_dir, np.linalg.inv(cam_pose).T)[:, :3]
-        gt_dir = np.matmul(x_rot_mat, gt_dir.T).T
-        gt_appr = np.concatenate((gt_appr[0], np.zeros((gt_appr[0].shape[0], 1))), 1)
-        gt_appr = np.matmul(gt_appr, np.linalg.inv(cam_pose).T)[:, :3]
-        gt_appr = np.matmul(x_rot_mat, gt_appr.T).T
+            gt_dir = np.concatenate((gt_dir[0], np.zeros((gt_dir[0].shape[0], 1))), 1)
+            gt_dir = np.matmul(gt_dir, np.linalg.inv(cam_pose).T)[:, :3]
+            gt_dir = np.matmul(x_rot_mat, gt_dir.T).T
+            gt_appr = np.concatenate((gt_appr[0], np.zeros((gt_appr[0].shape[0], 1))), 1)
+            gt_appr = np.matmul(gt_appr, np.linalg.inv(cam_pose).T)[:, :3]
+            gt_appr = np.matmul(x_rot_mat, gt_appr.T).T
 
-        hom = np.zeros((1, 3))
-        trans = np.array([[0, 0, 0, 1]]).T
-        x_rot_mat = np.concatenate((x_rot_mat, hom), 0)
-        x_rot_mat = np.concatenate((x_rot_mat, trans), 1)
+            hom = np.zeros((1, 3))
+            trans = np.array([[0, 0, 0, 1]]).T
+            x_rot_mat = np.concatenate((x_rot_mat, hom), 0)
+            x_rot_mat = np.concatenate((x_rot_mat, trans), 1)
 
-        # Convert ground truth grasp poses to camera frame
-        gt_pose = np.matmul(np.linalg.inv(cam_pose), gt_pose)
-        gt_pose = np.matmul(x_rot_mat, gt_pose)        
-        
-        pose_labels.append(gt_pose)
-        
-        # save to files to check
-        #np.save('obs_pcd', pcd)
-        #np.save('gt_pcd', gt_pcd_cam)
-        
-        # Find K nearest neighbors to each point from labeled contacts
-        knn_tree = KDTree(pcd)
-        indices = knn_tree.query_ball_point(gt_pcd_cam, radius) # M x k x 1
+            # Convert ground truth grasp poses to camera frame
+            gt_pose = np.matmul(np.linalg.inv(cam_pose), gt_pose)
+            gt_pose = np.matmul(x_rot_mat, gt_pose)        
 
-        # Create corresponding lists for baseline, approach, width, and binary success
-        dirs = np.zeros_like(pcd)
-        approaches = np.zeros_like(pcd)
-        widths = np.zeros([N, 1])
-        idx_array = []
-        
-        try:
-            for i, index_list in enumerate(indices):
-                # the index_list at position (i) is a list of the points in the observed point cloud that correspond to the ith grasp in the grasp list
-                # hopefully, if the hyperparams are good, then there won't be any overlap (multiple grasps corresponding to the same observed point)
-                # in the case of overlap, should pick one grasp to go label the point with (the closer one? or a random one?)
+            pose_labels.append(gt_pose)
 
-                dir_label = gt_dir[i]
-                appr_label = gt_appr[i]
-                width_label = gt_width[0, :][i]
-                for idx in index_list:
-                    idx_array.append([idx, i]) # point index, grasp label index
-                    dirs[idx] = dir_label
-                    approaches[idx] = appr_label
-                    widths[idx] = width_label
-        except:
-            print('zoinks')
-            from IPython import embed
-            embed()
-        label_idxs.append(np.array(idx_array))
-        
-        success = np.where(widths>0, 1, 0)
-        dir_labels.append(dirs)
-        approach_labels.append(approaches)
-        width_labels.append(widths)
-        success_labels.append(success)
+            # save to files to check
+            #np.save('obs_pcd', pcd)
+            #np.save('gt_pcd', gt_pcd_cam)
 
-    pose_labels = torch.Tensor(np.stack(pose_labels))
-    dir_labels = torch.Tensor(np.stack(dir_labels)).float()
-    width_labels = torch.Tensor(np.stack(width_labels)).float()
-    success_labels = torch.Tensor(np.stack(success_labels)).float()
-    approach_labels = torch.Tensor(np.stack(approach_labels)).float()
-    
-    return [pose_labels, label_idxs, dir_labels, width_labels, success_labels, approach_labels]
+            # Find K nearest neighbors to each point from labeled contacts
+            knn_tree = KDTree(pcd)
+            indices = knn_tree.query_ball_point(gt_pcd_cam, radius) # M x k x 1
+            # Create corresponding lists for baseline, approach, width, and binary success
+            dirs = np.zeros_like(pcd)
+            approaches = np.zeros_like(pcd)
+            widths = np.zeros([N, 1])
+            idx_array = []
+            pos_labels = np.array([])
+            try:
+                for i, index_list in enumerate(indices):
+                    # the index_list at position (i) is a list of the points in the observed point cloud that correspond to the ith grasp in the grasp list
+                    # hopefully, if the params are good, then there won't be any overlap (multiple grasps corresponding to the same observed point)
+                    # in the case of overlap, should pick one grasp to label the point with (the closer one? or a random one?)
+                    dir_label = gt_dir[i]
+                    appr_label = gt_appr[i]
+                    width_label = gt_width[0, :][i]
+                    for idx in index_list:
+                        idx_array.append([idx, i]) # point index, grasp label index
+                        dirs[idx] = dir_label
+                        approaches[idx] = appr_label
+                        widths[idx] = width_label
+            except:
+                print('zoinks')
+                from IPython import embed
+                embed()
+            label_idxs.append(np.array(idx_array))
+            #np.save('pos_labeled_pcd', pcd[np.array(idx_array)[:, 0]])
+            success = np.where(widths>0, 1, 0)
+            dir_labels.append(dirs)
+            approach_labels.append(approaches)
+            width_labels.append(widths)
+            success_labels.append(success)
+
+        pose_labels = torch.Tensor(np.stack(pose_labels))
+        dir_labels = torch.Tensor(np.stack(dir_labels)).float()
+        width_labels = torch.Tensor(np.stack(width_labels)).float()
+        success_labels = torch.Tensor(np.stack(success_labels)).float()
+        approach_labels = torch.Tensor(np.stack(approach_labels)).float()
+
+        return [pose_labels, label_idxs, dir_labels, width_labels, success_labels, approach_labels]
 
 class PointCloudReader:
     """
@@ -817,7 +817,7 @@ class PointCloudReader:
         #from IPython import embed
         #embed()
         
-        return pc, pc_normals, camera_pose, depth, camera_orientation
+        return pc, pc_normals, camera_pose, depth
 
     def change_object(self, cad_path, cad_scale):
         """

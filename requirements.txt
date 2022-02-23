@@ -11,3 +11,4 @@ torch-sparse
 torch-scatter
 torch-cluster
 python-fcl
+tensorboard
