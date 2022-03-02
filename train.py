@@ -23,14 +23,16 @@ def initialize_loaders(data_pth, data_config, include_val=False):
         val_loader = None
     return train_loader, val_loader
 
-def initialize_net(config_file):
+def initialize_net(config_file, load_model, save_path):
     torch.cuda.empty_cache()
     # Read in config yaml file to create config dictionary
     config_dict = config_utils.load_config(config_file)
-    #print(config_dict)
+
     # Init net
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     contactnet = ContactNet(config_dict, device).to(device)
+    if load_model:
+        contactnet.load_state_dict(torch.load(save_path))
     return contactnet, config_dict
 
 def train(model, config, train_loader, val_loader=None, epochs=1, save=True, save_pth=None, args=None):
@@ -82,27 +84,27 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
 
             optimizer.zero_grad()
             
-            #start_time = time.time()
             points, pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list, idx=idx, k=None)
-            #end_time = time.time()
-            #print('Delta time: ', end_time - start_time)
-            np.save('first_pcd', points[1].detach().cpu())
-            #print(pred_successes[1].shape)
-            np.save('success_tensor', pred_successes.detach().cpu()[1])
+            np.save('visualization/first_pcd_many', points[1].detach().cpu())
+            np.save('visualization/success_tensor', pred_successes.detach().cpu()[1])
             loss_list = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict, args)
             loss = loss_list[-1]
             writer.add_scalar('Loss/total', loss, i)
-            
+            writer.add_scalar('Loss/width', loss_list[2], i)
+            writer.add_scalar('Loss/conf', loss_list[0], i)
+            writer.add_scalar('Loss/add-s', loss_list[1], i)
+
             loss.backward() #retain_graph=True)
-            #print(model.multihead[3][3].weight.grad[0, :8])
             optimizer.step()
-            #scheduler.step()
             running_loss += loss
+
+            # save the model
+            if save:
+                torch.save(model.state_dict(), save_pth)
             
             if i%10 == 0:
                 print('[Epoch: %d, Batch: %4d / %4d], Train Loss: %.3f' % (epoch + 1, (i) + 1, len(train_loader), running_loss/10))
                 #print('CONF', loss_list[0].item(), 'ADD-S', loss_list[1].item(), 'WIDTH', loss_list[2].item())
-                #print(pred_successes)
                 running_loss = 0.0
 
         # Validation
@@ -115,9 +117,6 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
                     val_loss = model.loss(pred_grasps, pred_successes, pred_widths, label_dicts)
             print('Validation Loss: %.3f %%' % val_loss)
 
-        # save the model
-        if save:
-            torch.save(model.state_dict(), save_pth)
 
 if __name__=='__main__':
 
@@ -128,12 +127,10 @@ if __name__=='__main__':
     parser.add_argument('--save_path', type=str, default='./checkpoints/model_save.pth', help='path to save file for main net')
     parser.add_argument('--data_path', type=str, default='/home/alinasar/acronym/scene_contacts', help='path to acronym dataset with Contact-GraspNet folder')
     parser.add_argument('--root_path', type=str, default='/home/alinasar/pytorch_contactnet/', help='root path to repo')
+    parser.add_argument('--load_model', type=bool, default=False, help='whether to load saved model, specified with --save_path (otherwise will rewrite)')
     args = parser.parse_args()
 
-    # initialize dataloaders
-    #train_loader, val_loader = initialize_loaders(args.data_path)
-    
-    contactnet, config= initialize_net(args.config_path)
+    contactnet, config= initialize_net(args.config_path, args.load_model, args.save_path)
     data_config = config['data']
     train_loader, val_loader = initialize_loaders(args.data_path, data_config)
 

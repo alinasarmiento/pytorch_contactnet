@@ -494,7 +494,7 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
             gt_pcd = np.concatenate((gt_pcd, np.ones((gt_pcd.shape[0], 1))), 1)
             gt_pcd_cam = np.matmul(gt_pcd, np.linalg.inv(cam_pose).T)[:, :3]
             gt_pcd_cam = np.matmul(x_rot_mat, gt_pcd_cam.T).T
-            np.save('pos_pts', gt_pcd_cam)
+            np.save('pos_pts_recent', gt_pcd_cam)
             # Convert ground truth grasp vectors (approach and baseline) to camera frame
 
             gt_dir = np.concatenate((gt_dir[0], np.zeros((gt_dir[0].shape[0], 1))), 1)
@@ -793,7 +793,7 @@ class PointCloudReader:
             [pc, pc_normals, camera_pose, depth] -- [point cloud, point cloud normals, camera pose, depth]
         """
         if camera_pose is None:
-            viewing_index = 0 #np.random.randint(0, high=len(self._cam_orientations))
+            viewing_index = np.random.randint(0, high=len(self._cam_orientations)) #CHANGE IF OVERFIT
             camera_orientation = self._cam_orientations[viewing_index]
             camera_pose = self.get_cam_pose(camera_orientation)
 
@@ -802,11 +802,6 @@ class PointCloudReader:
         # 0.005 s
         rgb, depth, _, camera_pose = self._renderer.render(in_camera_pose, render_pc=False)
         depth = self._augment_depth(depth)
-
-        #imageio.imwrite('depth.png', depth)
-        #imageio.imwrite('rgb.png', rgb)
-        #from IPython import embed
-        #embed()
         
         pc = self._renderer._to_pointcloud(depth)
         

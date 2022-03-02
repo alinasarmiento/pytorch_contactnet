@@ -9,7 +9,7 @@ from scipy.spatial import KDTree, cKDTree
 from scipy.spatial.transform import Rotation as R
 
 def get_dataloader(data_path, data_config=None):
-    dataset = ContactDataset(data_path, data_config)
+    dataset = ContactDataset(data_path, data_config, overfit_test=False)
     dataloader = DataLoader(dataset, batch_size=data_config['batch_size'])
     return dataloader
 
@@ -128,7 +128,7 @@ class ContactDataset(Dataset):
         
         #if not self.overfit_test:
         self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
-        self.pc_cam, self.pc_normals, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True, camera_pose=self.camera_pose)
+        self.pc_cam, self.pc_normals, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True, camera_pose=None) #self.camera_pose
 
         '''
         pcd_mean = np.mean(self.pc_cam, axis=0)

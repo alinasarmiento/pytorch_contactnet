@@ -35,7 +35,7 @@ class ContactNet(nn.Module):
         Returns
             list of grasps (4x4 numpy arrays)
         '''
-        #np.save('first_pcd', pos.cpu().numpy())
+        np.save('first_pcd_many', pos.cpu().numpy())
         sample_pts = input_pcd.float()
         if k is not None:
             sample_pts = utils.farthest_point_downsample(input_pcd, k)
@@ -237,11 +237,11 @@ class ContactNet(nn.Module):
 
         pred_pts1 = pred_pts_list[0][:,:,:3]
         pred_pts2 = pred_pts_list[1][:,:,:3]
-        np.save('control_pt_list', pred_pts1.detach().cpu().numpy())
+        np.save('control_pt_list_many', pred_pts1.detach().cpu().numpy())
         label_pts1 = label_pts_list[0][0][:,:,:3]
-        np.save('label_pt_list', label_pts1.detach().cpu().numpy())
+        np.save('label_pt_list_many', label_pts1.detach().cpu().numpy())
         pred_s_pts = s_pts_list[0][:,:,:3]
-        np.save('success_pt_list', pred_s_pts.detach().cpu().numpy())
+        np.save('success_pt_list_many', pred_s_pts.detach().cpu().numpy())
 
         # Compare symmetric predicted and label control points to calculate "add-s" loss
         
@@ -253,8 +253,8 @@ class ContactNet(nn.Module):
             
             pred_success_masked = pred_success_list[point_success_mask]
             
-            norm_1 = torch.linalg.vector_norm((pred_pts - label_pts_1), dim=(1,2))
-            norm_2 = torch.linalg.vector_norm((pred_pts - label_pts_2), dim=(1,2))
+            norm_1 = torch.linalg.norm((pred_pts - label_pts_1), dim=(1,2))
+            norm_2 = torch.linalg.norm((pred_pts - label_pts_2), dim=(1,2))
             min_norm = torch.min(norm_1, norm_2)
             add_s_loss = pred_success_masked*min_norm
                                     
