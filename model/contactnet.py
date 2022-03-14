@@ -35,7 +35,6 @@ class ContactNet(nn.Module):
         Returns
             list of grasps (4x4 numpy arrays)
         '''
-        np.save('first_pcd_many', pos.cpu().numpy())
         sample_pts = input_pcd.float()
         if k is not None:
             sample_pts = utils.farthest_point_downsample(input_pcd, k)
@@ -51,7 +50,6 @@ class ContactNet(nn.Module):
                     feat, pos, batch, idx = module(*input_list)
                 else:
                     feat, pos, batch, idx = module(*input_list, sample=False, idx=idx)
-                    #np.save('pts_check', pos.cpu().numpy())
                 feature_cat = torch.cat((feature_cat, feat), 1)
             
             input_list = (feature_cat, pos, batch)
@@ -142,9 +140,8 @@ class ContactNet(nn.Module):
         grasp_labels = labels_dict['grasps']
         width_labels = labels_dict['width']
         success_labels = success_labels.reshape(success_labels.shape[0], -1) #np.transpose(success_labels, axes=(0,2,1))
-        
+       
         success_labels = torch.Tensor(success_labels).to(self.device)            
-        #print(width_labels[0][success_idxs[0][:, 0]].shape)
 
         # -- GRASP CONFIDENCE LOSS --
         # Use binary cross entropy loss on predicted success to find top-k preds with largest loss
@@ -160,45 +157,36 @@ class ContactNet(nn.Module):
         pos_pred_list = []
         width_label_list = []
         pred_width_list = []
-        # pos_pred - list of predicted grasp poses for positively labeled contact points
-        # pos_labels - list of labeled grasp poses for positively labeled contact points
 
+        empty_idx = []
         for batch, idx_list in enumerate(success_idxs):
-            idx_list = idx_list.T
-            point_idxs = idx_list[0]
-            label_idxs = idx_list[1]
+            try:
+                idx_list = idx_list.T
+                point_idxs = idx_list[0]
+                label_idxs = idx_list[1]
 
-            pos_labels = grasp_labels[batch, label_idxs, :4, :4]
-            pos_pred = pred_grasps[batch, point_idxs, :4, :4]
-            width_labels_masked = width_labels[batch, point_idxs]
-            pred_width_masked = pred_width[batch, point_idxs]
-            
-            pos_label_list.append(pos_labels)
-            pos_pred_list.append(pos_pred)
-            width_label_list.append(width_labels_masked)
-            pred_width_list.append(pred_width_masked)
+                pos_labels = grasp_labels[batch, label_idxs, :4, :4]
+                pos_pred = pred_grasps[batch, point_idxs, :4, :4]
+                width_labels_masked = width_labels[batch, point_idxs]
+                pred_width_masked = pred_width[batch, point_idxs]
 
+                pos_label_list.append(pos_labels)
+                pos_pred_list.append(pos_pred)
+                width_label_list.append(width_labels_masked)
+                pred_width_list.append(pred_width_masked)
+            except:
+                empty_idx.append(batch)
+                print('idx_list is mysteriously empty...')
 
         # -- WIDTH LOSS --
         # calculates loss on 10 grasp width bins using a sigmoid fn and binary cross entropy
 
-        '''
-        width_loss = []
-        for width_label, pred_width in zip(width_label_list, pred_width_list):
-            width_label = torch.Tensor(width_label).to(self.device)
-            width_loss_fn = nn.MSELoss().to(self.device)
-            width_loss.append(width_loss_fn(pred_width, width_label))
-        width_loss = np.mean(width_loss)
-        '''
         width_labels = torch.Tensor(np.array(width_labels)).to(self.device)
         width_labels = width_labels.reshape(width_labels.shape[0], -1)
 
         width_loss_fn = nn.MSELoss().to(self.device)
         raw_width_loss = width_loss_fn(pred_width, width_labels)#nn.BCEWithLogitsLoss(pred_width, width_labels)
-        #print(torch.sum(width_labels, dim=1))
-        #print(torch.sum(pred_width, dim=1))
-        width_loss = raw_width_loss #np.mean(masked_width_loss)
-        
+        width_loss = raw_width_loss #np.mean(masked_width_loss)        
             
         # create a predicted success mask (above a threshold)
         success_threshold = 0.5
@@ -237,36 +225,35 @@ class ContactNet(nn.Module):
 
         pred_pts1 = pred_pts_list[0][:,:,:3]
         pred_pts2 = pred_pts_list[1][:,:,:3]
-        np.save('control_pt_list_many', pred_pts1.detach().cpu().numpy())
+        np.save('visualization/control_pt_list_many', pred_pts1.detach().cpu().numpy())
         label_pts1 = label_pts_list[0][0][:,:,:3]
-        np.save('label_pt_list_many', label_pts1.detach().cpu().numpy())
+        np.save('visualization/label_pt_list_many', label_pts1.detach().cpu().numpy())
         pred_s_pts = s_pts_list[0][:,:,:3]
-        np.save('success_pt_list_many', pred_s_pts.detach().cpu().numpy())
+        np.save('visualization/success_pt_list_many', pred_s_pts.detach().cpu().numpy())
 
         # Compare symmetric predicted and label control points to calculate "add-s" loss
-        
+
         for success_idx, pred_success_list, pred_pts, label_pts in zip(success_idxs, pred_success, pred_pts_list, label_pts_list):
             point_success_mask = success_idx[:, 0]
             pred_pts = pred_pts[:, :, :3]
             label_pts_1 = label_pts[0][:, :, :3]
             label_pts_2 = label_pts[1][:, :, :3]
-            
+
             pred_success_masked = pred_success_list[point_success_mask]
-            
+
             norm_1 = torch.linalg.norm((pred_pts - label_pts_1), dim=(1,2))
             norm_2 = torch.linalg.norm((pred_pts - label_pts_2), dim=(1,2))
             min_norm = torch.min(norm_1, norm_2)
             add_s_loss = pred_success_masked*min_norm
-                                    
+
             add_s_loss = torch.mean(add_s_loss).to(self.device)
-        
+
         # -- APPROACH AND BASELINE LOSSES --
         # currently not used
-        
+
         total_loss = self.config['loss']['conf_mult']*conf_loss + self.config['loss']['add_s_mult']*add_s_loss + self.config['loss']['width_mult']*width_loss
         print(conf_loss.item(), add_s_loss.item(), width_loss.item())
 
-        
         return conf_loss, add_s_loss, width_loss, total_loss #, approach_loss, baseline_loss
         
     def SAnet(self, cfg):

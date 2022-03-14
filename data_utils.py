@@ -486,17 +486,14 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
         label_idxs = []
         pose_labels = []
         for pcd, cam_pose, gt_pcd, gt_pose, gt_dir, gt_appr, gt_width in zip(obs_pcds, cam_poses, pos_contact_pts_mesh, grasp_poses, pos_contact_dirs, pos_contact_approaches, pos_finger_diffs):
-            #gt_pcd = copy.deepcopy(gt_pcd_torch).cpu().detach().numpy()
-            #pcd = copy.deepcopy(pcd_torch).cpu().detach().numpy()
-
             # Convert ground truth point cloud to camera frame
+
             x_rot_mat = R.from_euler('xyz', [np.pi, 0, 0]).as_matrix()
             gt_pcd = np.concatenate((gt_pcd, np.ones((gt_pcd.shape[0], 1))), 1)
             gt_pcd_cam = np.matmul(gt_pcd, np.linalg.inv(cam_pose).T)[:, :3]
             gt_pcd_cam = np.matmul(x_rot_mat, gt_pcd_cam.T).T
             np.save('pos_pts_recent', gt_pcd_cam)
             # Convert ground truth grasp vectors (approach and baseline) to camera frame
-
             gt_dir = np.concatenate((gt_dir[0], np.zeros((gt_dir[0].shape[0], 1))), 1)
             gt_dir = np.matmul(gt_dir, np.linalg.inv(cam_pose).T)[:, :3]
             gt_dir = np.matmul(x_rot_mat, gt_dir.T).T
@@ -512,12 +509,8 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
             # Convert ground truth grasp poses to camera frame
             gt_pose = np.matmul(np.linalg.inv(cam_pose), gt_pose)
             gt_pose = np.matmul(x_rot_mat, gt_pose)        
-
+            
             pose_labels.append(gt_pose)
-
-            # save to files to check
-            #np.save('obs_pcd', pcd)
-            #np.save('gt_pcd', gt_pcd_cam)
 
             # Find K nearest neighbors to each point from labeled contacts
             knn_tree = KDTree(pcd)
@@ -528,31 +521,27 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
             widths = np.zeros([N, 1])
             idx_array = []
             pos_labels = np.array([])
-            try:
-                for i, index_list in enumerate(indices):
-                    # the index_list at position (i) is a list of the points in the observed point cloud that correspond to the ith grasp in the grasp list
-                    # hopefully, if the params are good, then there won't be any overlap (multiple grasps corresponding to the same observed point)
-                    # in the case of overlap, should pick one grasp to label the point with (the closer one? or a random one?)
-                    dir_label = gt_dir[i]
-                    appr_label = gt_appr[i]
-                    width_label = gt_width[0, :][i]
-                    for idx in index_list:
-                        idx_array.append([idx, i]) # point index, grasp label index
-                        dirs[idx] = dir_label
-                        approaches[idx] = appr_label
-                        widths[idx] = width_label
-            except:
-                print('zoinks')
-                from IPython import embed
-                embed()
+            
+            for i, index_list in enumerate(indices):
+                # the index_list at position (i) is a list of the points in the observed point cloud that correspond to the ith grasp in the grasp list
+                # hopefully, if the params are good, then there won't be any overlap (multiple grasps corresponding to the same observed point)
+                # in the case of overlap, should pick one grasp to label the point with (the closer one? or a random one?)
+                dir_label = gt_dir[i]
+                appr_label = gt_appr[i]
+                width_label = gt_width[0, :][i]
+                for idx in index_list:
+                    idx_array.append([idx, i]) # point index, grasp label index
+                    dirs[idx] = dir_label
+                    approaches[idx] = appr_label
+                    widths[idx] = width_label
+
             label_idxs.append(np.array(idx_array))
-            #np.save('pos_labeled_pcd', pcd[np.array(idx_array)[:, 0]])
             success = np.where(widths>0, 1, 0)
             dir_labels.append(dirs)
             approach_labels.append(approaches)
             width_labels.append(widths)
             success_labels.append(success)
-
+            
         pose_labels = torch.Tensor(np.stack(pose_labels))
         dir_labels = torch.Tensor(np.stack(dir_labels)).float()
         width_labels = torch.Tensor(np.stack(width_labels)).float()

@@ -117,6 +117,8 @@ class SceneRenderer:
             path += 'bj'
         elif path.endswith('.'):
             path += 'obj'
+        elif not path.endswith('.obj'):
+            path += '.obj'
         try:
             obj = Object(path)
             obj.rescale(scale)

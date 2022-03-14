@@ -51,7 +51,7 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
             batch_list = torch.arange(0, data_shape[0])
             batch_list = batch_list[:, None].repeat(1, data_shape[1])
             batch_list = batch_list.view(-1).long().to(model.device)
-            
+
             pcd = scene_pcds.view(-1, data_shape[2]).to(model.device)
             expanded_pcd = copy.deepcopy(pcd.detach().cpu())
 
@@ -60,13 +60,13 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
                 expanded_pcd = expanded_pcd[idx]
                 expanded_pcd = expanded_pcd.view(data_shape[0], -1, 3)
                 grasp_poses = gt_dict['grasp_poses'] #currently in the wrong shape, need to expand and rebatch for label computation
-                grasp_poses = grasp_poses[0].view(data_shape[0], -1, 4, 4) # B x num_label_points x 4 x 4
+                grasp_poses = grasp_poses.view(data_shape[0], -1, 4, 4) # B x num_label_points x 4 x 4
 
                 # farthest point sample the pointcloud
 
                 gt_points = gt_dict['contact_pts']
-                pcd_shape_batched = (gt_points.shape[0], gt_points.shape[2]//gt_points.shape[0], -1)
-                gt_points = gt_points[0].view(pcd_shape_batched) #.to(model.device)
+                pcd_shape_batched = (gt_points.shape[0], gt_points.shape[2], -1)
+                gt_points = gt_points.view(pcd_shape_batched) #.to(model.device)
                 grasp_poses, success_idxs, base_dirs, width, success, approach_dirs = compute_labels(gt_points,
                                                                                         expanded_pcd[:, :, :3],
                                                                                         cam_poses,
@@ -75,17 +75,25 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
                                                                                         gt_dict['offsets'],
                                                                                         grasp_poses,
                                                                                         config['data'])
-                
+
                 labels_dict = {}
                 labels_dict['success_idxs'] = success_idxs
                 labels_dict['success'] = success
                 labels_dict['grasps'] = grasp_poses
                 labels_dict['width'] = width
 
+            flag = False
+            for idx_list in success_idxs:
+                if len(idx_list) == 0:
+                    flag = True
+                    break
+            if flag: continue
+                                    
             optimizer.zero_grad()
-            
+            np.save('visualization/first_pcd_many', scene_pcds[0][:, :3].detach().cpu())
+
             points, pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list, idx=idx, k=None)
-            np.save('visualization/first_pcd_many', points[1].detach().cpu())
+
             np.save('visualization/success_tensor', pred_successes.detach().cpu()[1])
             loss_list = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict, args)
             loss = loss_list[-1]
@@ -101,7 +109,7 @@ def train(model, config, train_loader, val_loader=None, epochs=1, save=True, sav
             # save the model
             if save:
                 torch.save(model.state_dict(), save_pth)
-            
+
             if i%10 == 0:
                 print('[Epoch: %d, Batch: %4d / %4d], Train Loss: %.3f' % (epoch + 1, (i) + 1, len(train_loader), running_loss/10))
                 #print('CONF', loss_list[0].item(), 'ADD-S', loss_list[1].item(), 'WIDTH', loss_list[2].item())

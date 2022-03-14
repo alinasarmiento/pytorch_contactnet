@@ -68,11 +68,9 @@ def crop_pcd(pointcloud, center, save_name, radius=0.5):
     '''
     knn_tree = cKDTree(pointcloud)
     indices = knn_tree.query_ball_point(center, radius)
-    #indices = np.delete(indices, np.where(indices==pointcloud.shape[0]))
     cropped_pcd = pointcloud[indices]
     print('cropping', pointcloud.shape, cropped_pcd.shape)
     np.save(save_name, pointcloud)
-    #print('float or double?', type(cropped_pcd[0]))
     return cropped_pcd, indices
 
 class ContactDataset(Dataset):
