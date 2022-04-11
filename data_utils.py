@@ -31,7 +31,7 @@ def load_scene_contacts(dataset_folder, test_split_only=False, num_test=None, sc
     for contact_path in scene_contact_paths:
         #print(contact_path)
         try:
-            npz = np.load(contact_path, allow_pickle=False)
+            npz = np.load(contact_path, allow_pickle=True)
             contact_info = {'scene_contact_points':npz['scene_contact_points'],
                             'obj_paths':npz['obj_paths'],
                             'obj_transforms':npz['obj_transforms'],
@@ -826,8 +826,6 @@ class PointCloudReader:
         self._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
         if visualize:
             self._visualizer.change_scene(obj_paths, obj_scales, obj_transforms)
-
-
 
     def __del__(self):
         print('********** terminating renderer **************')

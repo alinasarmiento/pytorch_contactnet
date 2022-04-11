@@ -144,7 +144,7 @@ class SceneRenderer:
             self._cache[(path, scale)] = context
 
             return self._cache[(path, scale)]
-        except(BadZipFile, FileNotFoundError):
+        except:
             pass
         
     def change_scene(self, obj_paths, obj_scales, obj_transforms):
@@ -164,12 +164,15 @@ class SceneRenderer:
             self._cache = {}
             
         for p,t,s in zip(obj_paths, obj_transforms, obj_scales):
-            #print(p, t, s)
+            #print(t)
             object_context = self._load_object(p, s)
             object_context = deepcopy(object_context)
 
-            self._scene.add_node(object_context['node'])
-            self._scene.set_pose(object_context['node'], t)
+            if object_context == None:
+                continue
+            else:
+                self._scene.add_node(object_context['node'])
+                self._scene.set_pose(object_context['node'], t)
 
         if self._viewer:
             self._viewer.render_lock.release()

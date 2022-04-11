@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation as R
 
 def get_dataloader(data_path, data_config=None):
     dataset = ContactDataset(data_path, data_config, overfit_test=False)
-    dataloader = DataLoader(dataset, batch_size=data_config['batch_size'])
+    dataloader = DataLoader(dataset, shuffle=True, batch_size=data_config['batch_size'])
     return dataloader
 
 def extract_point_clouds(self, depth, K, segmap=None, rgb=None, z_range=[0.2,1.8], segmap_id=0, skip_border_objects=False, margin_px=5):
@@ -111,7 +111,7 @@ class ContactDataset(Dataset):
         if not self.overfit_test:
             data_file = self.data[idx]
             filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
-            scene_data = load(filename)
+            scene_data = load(filename, allow_pickle=True)
             self.gt_contact_info = self.get_contact_info([scene_data])
         else:
             scene_data = self.overfit_scene

@@ -265,7 +265,7 @@ class ContactNet(nn.Module):
             centers - list of number of neighborhoods to sample for each level
             mlps - list of lists of mlp layers for each level, first mlp must start with in_dimension
         '''
-        sa_modules = [] #nn.ModuleList()
+        sa_modules = nn.ModuleList()
         input_size = 0
         num_points = 20000
         for r_list, center, mlp_list in zip(cfg['radii'], cfg['centers'], cfg['mlps']):
@@ -306,7 +306,7 @@ class ContactNet(nn.Module):
             ps - list of dropout rates for each head
         note: heads are listed in order SUCCESS_CONFIDENCE, Z1, Z2, WIDTH
         '''
-        head_list = []
+        head_list = nn.ModuleList()
         for out_dim, p in zip(cfg['out_dims'], cfg['ps']):
             head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim'], 128, 1),
                                  nn.BatchNorm1d(128),
