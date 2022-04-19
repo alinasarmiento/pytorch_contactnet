@@ -8,6 +8,7 @@ import math
 from yacs.config import CfgNode as CN
 import copy
 import trimesh
+import random
 
 sys.path[0] += '/../'
 print(os.getcwd())
@@ -125,7 +126,7 @@ class PandaPB():
         self.camera = RGBDCameraPybullet(cfgs=self._camera_cfgs(), pb_client=self.robot.pb_client)
         self.camera.setup_camera(
             focus_pt=[0, 0, 0], #cam_cfg['focus_pt'])
-            dist=2, yaw=0, pitch=-40)#cam_cfg['dist'],
+            dist=1, yaw=0, pitch=-40)#cam_cfg['dist'],
             #yaw=cam_cfg['yaw'],
             #pitch=cam_cfg['pitch'],
             #roll=cam_cfg['roll'])
@@ -227,21 +228,27 @@ class PandaPB():
             depth_min=-5.0,
             depth_max=5.0)
 
-
         # crop pointcloud and potentially center it as well
-        x_mask = np.where((pcd[:, 0] < 0.5) & (pcd[:, 0] > -0.5))
-        y_mask = np.where((pcd[:, 1] < 0.5) & (pcd[:, 1] > -0.5))
-        z_mask = np.where((pcd[:, 2] < 0.25) & (pcd[:, 2] > -0.25))
+        x_mask = np.where((pcd[:, 0] < 0.75) & (pcd[:, 0] > -0.75))
+        y_mask = np.where((pcd[:, 1] < 0.75) & (pcd[:, 1] > -0.75))
+        z_mask = np.where((pcd[:, 2] < 0.25)) # & (pcd[:, 2] > 0.04))
         mask = np.intersect1d(x_mask, y_mask)
         mask = np.intersect1d(mask, z_mask)
         pcd = pcd[mask]
-
         
+        # go from world frame to camera frame
+        world2cam = np.linalg.inv([self.camera.cam_ext_mat])
+        pcd = np.concatenate((pcd, np.ones((pcd.shape[0],1))), axis=1)
+        pcd = np.transpose(pcd, (1,0))
+        world2cam = np.tile(world2cam, (pcd.shape[0], 1, 1))
+        pcd = np.matmul(world2cam, pcd)
+        pcd = np.transpose(pcd, (2, 0, 1))
+        pcd  = pcd[:, 0, :3]
+
         # Forward pass into model
-        downsample = np.linspace(0, pcd.shape[0]-1, 20000, dtype=int)
+        downsample = np.array(random.sample(range(pcd.shape[0]-1), 20000)) #np.linspace(0, pcd.shape[0]-1, 20000, dtype=int)
         pcd = pcd[downsample, :]
-        print(pcd.shape[0])
-        #np.save('pybullet_pcd.npy', pcd)        
+        np.save('pybullet_pcd.npy', pcd)        
         print('here')
         '''
         import matplotlib.pyplot as plt
@@ -252,27 +259,32 @@ class PandaPB():
         tpcd = trimesh.PointCloud(pcd)
         # tpcd.show()
         '''
-        from IPython import embed; embed()
         
         pcd = torch.Tensor(pcd).to(dtype=torch.float32).to(self.model.device) 
         batch = torch.ones(pcd.shape[0]).to(dtype=torch.int64).to(self.model.device)
         idx = torch.linspace(0, pcd.shape[0]-1, 2048).to(dtype=torch.int64).to(self.model.device) #fps(pcd, batch, 2048/pcd.shape[0])
-        print(pcd[:, 3:])
-        print(pcd[:, :3].shape)
-        print(batch.shape)
-        print(idx.shape)
         points, pred_grasps, pred_successes, pred_widths = self.model(pcd[:, 3:], pos=pcd[:, :3], batch=batch, idx=idx, k=None)
         print('model pass')
         pred_grasps = torch.flatten(pred_grasps, start_dim=0, end_dim=1)
         pred_successes = torch.flatten(pred_successes)
         pred_widths = torch.flatten(pred_widths, start_dim=0, end_dim=1)
         points = torch.flatten(points, start_dim=0, end_dim=1)
+
         # Return a SINGLE predicted grasp
         point = points[torch.argmax(pred_successes)]
         top_grasp = pred_grasps[torch.argmax(pred_successes)]
         grasp_width = pred_widths[torch.argmax(pred_successes)]
-        #from IPython import embed; embed()
-        return top_grasp.detach().cpu(), grasp_width.detach().cpu(), point, torch.max(pred_successes).detach().cpu()
+        print(point.shape)
+        print(top_grasp.shape)
+        
+        # transform back into the world frame
+        cam2world = np.array([self.camera.cam_ext_mat])
+        top_grasp = np.matmul(cam2world, top_grasp.detach().cpu())[0]
+        point = np.matmul(cam2world, np.concatenate((point.detach().cpu(), [1])))[0, :3]
+
+        from IPython import embed; embed()
+        
+        return top_grasp, grasp_width.detach().cpu(), point, torch.max(pred_successes).detach().cpu()
 
     def check_collision(self):
         pb_client = get_client()
@@ -325,19 +337,12 @@ class PandaPB():
 
         ############
         # VISUALIZATION IN OPENGL
-        
-        #something needs to be fixed about grasp pose, i think
-        fix_mat = np.eye(4)
-        rot_fix = R.from_euler('x', np.pi, degrees=False).as_matrix()
-        fix_mat[:3, :3] = rot_fix
-        #fix_mat[:, :3] = [0, 0, 0.3]
-        
-        #predicted_grasp[:3, 2] = -predicted_grasp[:3, 2]
-        #predicted_grasp = np.matmul(fix_mat, predicted_grasp)
+
         rot = R.from_matrix(predicted_grasp[:3, :3])
 
         quat = rot.as_quat()
         pos = predicted_grasp[:3, -1]
+        pos[2] += 0.3
         lift_pos = copy.deepcopy(pos)
         lift_pos[2] += 0.3
 
@@ -377,6 +382,7 @@ class PandaPB():
 
         q = [0,0,0,1]
         t = point
+        t[2] += 0.3
         proj = self.camera.proj_matrix
         
         collision_args = {}
@@ -433,7 +439,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     contactnet, optim, config = initialize_net(args.config_path, load_model=True, save_path=args.save_path)
-    from IPython import embed; embed()
+    #from IPython import embed; embed()
     dataset = ContactDataset(args.data_path, config['data'])
     panda_pb = PandaPB(contactnet, dataset, config)
     successful = panda_pb.pb_execute()

@@ -66,10 +66,11 @@ def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
             #mc_vis[name_i+'wrist'].set_object(g.Line(g.PointsGeometry(wrist)))
 
 def visualize(args):
-    control_expanded = np.load('control_pt_list_many.npy')
-    label_expanded = np.load('label_pt_list_many.npy')
-    s_grasp_expanded = np.load('success_pt_list_many.npy')
+    #control_expanded = np.load('control_pt_list_many.npy')
+    #label_expanded = np.load('label_pt_list_many.npy')
+    #s_grasp_expanded = np.load('success_pt_list_many.npy')
     pybullet = np.load('pybullet_pcd.npy')
+    p = np.load('first_pcd_many.npy')
     vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
     vis['scene'].delete()
     print('MeshCat URL: %s' % vis.url())
@@ -86,7 +87,7 @@ def visualize(args):
     #sample_grasp_show(vis, s_grasp_expanded, name='scene/success_masked/', freq=100)
 
     meshcat_pcd_show(vis, pybullet, name='scene/pb')
-
+    #meshcat_pcd_show(vis, p, name='scene/pcd')
     #meshcat_pcd_show(vis, gt_pcd,  name='scene/gt')
     #meshcat_pcd_show(vis, obs_pcd, name='scene/obs')
     #meshcat_pcd_show(vis, control_label_pcd, name='scene/control_pts')

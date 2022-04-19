@@ -223,6 +223,7 @@ class ContactNet(nn.Module):
             pred_pts_list.append(pred_pts)
             s_pts_list.append(pred_s_pts)
 
+        '''
         pred_pts1 = pred_pts_list[0][:,:,:3]
         pred_pts2 = pred_pts_list[1][:,:,:3]
         np.save('visualization/control_pt_list_many', pred_pts1.detach().cpu().numpy())
@@ -230,7 +231,7 @@ class ContactNet(nn.Module):
         np.save('visualization/label_pt_list_many', label_pts1.detach().cpu().numpy())
         pred_s_pts = s_pts_list[0][:,:,:3]
         np.save('visualization/success_pt_list_many', pred_s_pts.detach().cpu().numpy())
-
+        '''
         # Compare symmetric predicted and label control points to calculate "add-s" loss
 
         for success_idx, pred_success_list, pred_pts, label_pts in zip(success_idxs, pred_success, pred_pts_list, label_pts_list):

@@ -100,10 +100,10 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
             if flag: continue
                                     
             optimizer.zero_grad()
-            np.save('visualization/first_pcd_many', scene_pcds[0][:, :3].detach().cpu())
+            #np.save('visualization/first_pcd_many', scene_pcds[0][:, :3].detach().cpu())
             points, pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list, idx=idx, k=None)
 
-            np.save('visualization/success_tensor', pred_successes.detach().cpu()[1])
+            #np.save('visualization/success_tensor', pred_successes.detach().cpu()[1])
             loss_list = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict, args)
             loss = loss_list[-1]
             writer.add_scalar('Loss/total', loss, i)
@@ -111,6 +111,8 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
             writer.add_scalar('Loss/conf', loss_list[0], i)
             writer.add_scalar('Loss/add-s', loss_list[1], i)
 
+            from IPython import embed; embed()
+            
             loss.backward() #retain_graph=True)
             optimizer.step()
             running_loss += loss
