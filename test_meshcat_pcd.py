@@ -87,7 +87,7 @@ def visualize(args):
     #sample_grasp_show(vis, s_grasp_expanded, name='scene/success_masked/', freq=100)
 
     meshcat_pcd_show(vis, pybullet, name='scene/pb')
-    #meshcat_pcd_show(vis, p, name='scene/pcd')
+    meshcat_pcd_show(vis, p, name='scene/pcd')
     #meshcat_pcd_show(vis, gt_pcd,  name='scene/gt')
     #meshcat_pcd_show(vis, obs_pcd, name='scene/obs')
     #meshcat_pcd_show(vis, control_label_pcd, name='scene/control_pts')

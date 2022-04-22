@@ -31,7 +31,7 @@ def load_scene_contacts(dataset_folder, test_split_only=False, num_test=None, sc
     for contact_path in scene_contact_paths:
         #print(contact_path)
         try:
-            npz = np.load(contact_path, allow_pickle=True)
+            npz = np.load(contact_path, allow_pickle=True, encoding='bytes')
             contact_info = {'scene_contact_points':npz['scene_contact_points'],
                             'obj_paths':npz['obj_paths'],
                             'obj_transforms':npz['obj_transforms'],
@@ -302,7 +302,7 @@ def load_available_input_data(p, K=None):
         cam_K = np.array(K).reshape(3,3)
 
     if '.np' in p:
-        data = np.load(p, allow_pickle=True)
+        data = np.load(p, allow_pickle=True, encoding='bytes')
         if '.npz' in p:
             keys = data.files
         else:
@@ -541,7 +541,23 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
             approach_labels.append(approaches)
             width_labels.append(widths)
             success_labels.append(success)
-            
+
+            ##################
+            # EXPERIMENTAL
+            # note: grasp width for panda is 0.08 meters
+
+            max_width = 0.08
+            num_bins = 10
+            bin_edges = torch.linspace(0, max_width, num_bins)
+            w_idcs = []
+            for w in width_labels:
+                w_bin = torch.where(w > bin_edges)[-1] # index of bin
+                w_idcs.append(w_bin)
+            width_labels = torch.nn.functional.one_hot(w_idcs)
+            ###################
+
+
+
         pose_labels = torch.Tensor(np.stack(pose_labels))
         dir_labels = torch.Tensor(np.stack(dir_labels)).float()
         width_labels = torch.Tensor(np.stack(width_labels)).float()

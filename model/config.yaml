@@ -95,7 +95,7 @@ data:
   max_radius: .005
   filter_z: True
   z_val: -0.1
-  batch_size: 2
+  batch_size: 8
   num_points: 2048
 train:
   lr: 0.001

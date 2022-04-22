@@ -34,7 +34,7 @@ def initialize_net(config_file, load_model, save_path):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     contactnet = ContactNet(config_dict, device).to(device)
     optimizer = torch.optim.Adam(contactnet.parameters(), lr=0.001) #, weight_decay=0.1)
-    if load_model:
+    if load_model==True:
         print('loading model')
         checkpoint = torch.load(save_path)
         contactnet.load_state_dict(checkpoint['state_dict'])
@@ -66,7 +66,6 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
 
             with torch.no_grad():
                 idx = fps(expanded_pcd[:, :3], batch_list.detach().cpu(), 2048/20000) # TODO: take out hard coded ratio
-                print(type(idx), idx.shape, idx.dtype)
                 expanded_pcd = expanded_pcd[idx]
                 expanded_pcd = expanded_pcd.view(data_shape[0], -1, 3)
                 grasp_poses = gt_dict['grasp_poses'] #currently in the wrong shape, need to expand and rebatch for label computation
@@ -110,8 +109,6 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
             writer.add_scalar('Loss/width', loss_list[2], i)
             writer.add_scalar('Loss/conf', loss_list[0], i)
             writer.add_scalar('Loss/add-s', loss_list[1], i)
-
-            from IPython import embed; embed()
             
             loss.backward() #retain_graph=True)
             optimizer.step()
@@ -151,7 +148,7 @@ if __name__=='__main__':
     parser.add_argument('--load_path', type=str, default='', help='what path to load the saved model from')
     #parser.add_argument('--i', type=int, default=0, help='sample num to start on')
     args = parser.parse_args()
-
+    
     contactnet, optimizer, config= initialize_net(args.config_path, args.load_model, args.load_path)
     data_config = config['data']
     train_loader, val_loader = initialize_loaders(args.data_path, data_config)

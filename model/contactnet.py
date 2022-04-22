@@ -146,7 +146,20 @@ class ContactNet(nn.Module):
         # -- GRASP CONFIDENCE LOSS --
         # Use binary cross entropy loss on predicted success to find top-k preds with largest loss
         conf_loss_fn = nn.BCELoss(reduction='none').to(self.device)
-        conf_loss = torch.mean(torch.topk(conf_loss_fn(pred_success, success_labels), k=512)[0]).to(self.device)
+        conf_loss_pure = torch.mean(torch.topk(conf_loss_fn(pred_success, success_labels), k=512)[0]).to(self.device)
+
+        #############
+        # experimental
+        
+        pos_conf_lossfn = nn.BCELoss(reduction='none').to(self.device)
+        pos_s = torch.where(success_labels==1)
+        pos_s_labels = success_labels[pos_s]
+        pos_s_pred = pred_success[pos_s]
+        pos_s_loss = torch.mean(pos_conf_lossfn(pos_s_pred, pos_s_labels)).to(self.device)
+
+        conf_loss = 0.5*conf_loss_pure + 0.5*pos_s_loss
+        
+        #############
         
         # -- GEOMETRIC LOSS --
         # Turn each gripper control point into a pose object

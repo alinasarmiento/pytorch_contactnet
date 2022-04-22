@@ -54,7 +54,7 @@ class PandaPB():
         connect(use_gui=gui)
         with LockRenderer():
             with HideOutput(False):
-                 self.pb_robot = load_pybullet(FRANKA_URDF, base_pos=[-0.3, 0.3, 0.3], fixed_base=True)
+                 self.pb_robot = load_pybullet(FRANKA_URDF, base_pos=[-0.3, 0.3, 0], fixed_base=True)
                  assign_link_colors(self.pb_robot, max_colors=3, s=0.5, v=1.)
         self.model = contactnet
         self.dataset = dataset
@@ -80,7 +80,10 @@ class PandaPB():
         return _ROOT_C.clone()
 
     def get_rand_scene(self):
-        scene_idx = 0 #np.random.randint(0, len(self.dataset.data))
+        '''
+        Returns a random scene from the ShapeNet generated scenes folder
+        '''
+        scene_idx = np.random.randint(0, len(self.dataset.data))
         data_file = self.dataset.data[scene_idx]
         filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
         scene_data = np.load(filename, allow_pickle=True)
@@ -126,7 +129,7 @@ class PandaPB():
         self.camera = RGBDCameraPybullet(cfgs=self._camera_cfgs(), pb_client=self.robot.pb_client)
         self.camera.setup_camera(
             focus_pt=[0, 0, 0], #cam_cfg['focus_pt'])
-            dist=1, yaw=0, pitch=-40)#cam_cfg['dist'],
+            dist=1.5, yaw=0, pitch=-40)#cam_cfg['dist'],
             #yaw=cam_cfg['yaw'],
             #pitch=cam_cfg['pitch'],
             #roll=cam_cfg['roll'])
@@ -141,6 +144,7 @@ class PandaPB():
             print(transform)
             rot_mat= np.array(transform[:3, :3])
             t = np.array(transform[:, 3]).T[:3]
+            t[2] -= 0.3
             q = R.from_matrix(rot_mat).as_quat()
 
             tmesh = trimesh.load(path, process=False)
@@ -182,7 +186,7 @@ class PandaPB():
                                            baseOrientation=q)
                                            #**kwargs)
             self.pb_ids.append(body_id)
-            t[2] -= 0.3 #bring the objects down onto the floor for airobot rendering
+            #t[2] -= 0.3 #bring the objects down onto the floor for airobot rendering
             self.robot.pb_client.load_geom(shape_type='mesh', visualfile=tmp_path, collifile=tmp_path,
                                      mass=1.0, mesh_scale=scale, rgba=[0.5,0,0,1], specular=[0,0.5,0.4],
                                      base_pos=t, base_ori=q)
@@ -216,7 +220,7 @@ class PandaPB():
                                        #**kwargs)                                                                                                                                     
         self.pb_ids.append(body_id)
         '''    
-        # Render pointcloud...
+        # Render pointcloud
         
         rgb, depth, seg = self.camera.get_images(
                     get_rgb=True,
@@ -228,27 +232,31 @@ class PandaPB():
             depth_min=-5.0,
             depth_max=5.0)
 
-        # crop pointcloud and potentially center it as well
-        x_mask = np.where((pcd[:, 0] < 0.75) & (pcd[:, 0] > -0.75))
-        y_mask = np.where((pcd[:, 1] < 0.75) & (pcd[:, 1] > -0.75))
+        # Crop pointcloud and potentially center it as well
+        x_mask = np.where((pcd[:, 0] < 0.5) & (pcd[:, 0] > -0.5))
+        y_mask = np.where((pcd[:, 1] < 0.5) & (pcd[:, 1] > -0.5))
         z_mask = np.where((pcd[:, 2] < 0.25)) # & (pcd[:, 2] > 0.04))
         mask = np.intersect1d(x_mask, y_mask)
         mask = np.intersect1d(mask, z_mask)
         pcd = pcd[mask]
         
-        # go from world frame to camera frame
-        world2cam = np.linalg.inv([self.camera.cam_ext_mat])
-        pcd = np.concatenate((pcd, np.ones((pcd.shape[0],1))), axis=1)
-        pcd = np.transpose(pcd, (1,0))
-        world2cam = np.tile(world2cam, (pcd.shape[0], 1, 1))
-        pcd = np.matmul(world2cam, pcd)
-        pcd = np.transpose(pcd, (2, 0, 1))
-        pcd  = pcd[:, 0, :3]
+        # Go from world frame to camera frame
+        world2cam = np.linalg.inv(self.camera.cam_ext_mat)
+        zr = R.from_euler('z', np.pi, degrees=False)
+        z_rot = np.eye(4)
+        z_rot[:3, :3] = zr.as_matrix()
+        world2cam = np.matmul(z_rot, world2cam)
+        pcd_cam = np.concatenate((pcd, np.ones((pcd.shape[0],1))), axis=1)
+        pcd_cam = np.expand_dims(pcd_cam, 2)
+        pcd_cam = np.matmul(world2cam, pcd_cam)
+        pcd_cam = np.transpose(pcd_cam, (2, 0, 1))
+        pcd_cam = pcd_cam[0, :, :3]
 
         # Forward pass into model
-        downsample = np.array(random.sample(range(pcd.shape[0]-1), 20000)) #np.linspace(0, pcd.shape[0]-1, 20000, dtype=int)
+        downsample = np.array(random.sample(range(pcd_cam.shape[0]-1), 20000))
+        pcd_cam = pcd_cam[downsample, :]
         pcd = pcd[downsample, :]
-        np.save('pybullet_pcd.npy', pcd)        
+        np.save('pybullet_pcd.npy', pcd_cam)        
         print('here')
         '''
         import matplotlib.pyplot as plt
@@ -260,29 +268,60 @@ class PandaPB():
         # tpcd.show()
         '''
         
-        pcd = torch.Tensor(pcd).to(dtype=torch.float32).to(self.model.device) 
+        pcd_cam = torch.Tensor(pcd_cam).to(dtype=torch.float32).to(self.model.device) 
         batch = torch.ones(pcd.shape[0]).to(dtype=torch.int64).to(self.model.device)
         idx = torch.linspace(0, pcd.shape[0]-1, 2048).to(dtype=torch.int64).to(self.model.device) #fps(pcd, batch, 2048/pcd.shape[0])
-        points, pred_grasps, pred_successes, pred_widths = self.model(pcd[:, 3:], pos=pcd[:, :3], batch=batch, idx=idx, k=None)
+        points, pred_grasps, pred_successes, pred_widths = self.model(pcd_cam[:, 3:], pos=pcd_cam[:, :3], batch=batch, idx=idx, k=None)
         print('model pass')
         pred_grasps = torch.flatten(pred_grasps, start_dim=0, end_dim=1)
         pred_successes = torch.flatten(pred_successes)
         pred_widths = torch.flatten(pred_widths, start_dim=0, end_dim=1)
         points = torch.flatten(points, start_dim=0, end_dim=1)
 
+        '''
         # Return a SINGLE predicted grasp
-        point = points[torch.argmax(pred_successes)]
-        top_grasp = pred_grasps[torch.argmax(pred_successes)]
-        grasp_width = pred_widths[torch.argmax(pred_successes)]
+        best_point = points[torch.argmax(pred_successes)]
+        best_top_grasp = pred_grasps[torch.argmax(pred_successes)]
+        best_grasp_width = pred_widths[torch.argmax(pred_successes)]
         print(point.shape)
         print(top_grasp.shape)
+        '''
         
+        # Return a sample of predicted grasps
+        pcd = pcd[idx.detach().cpu().numpy()]
+        obj_mask = np.where((pcd[:, 2] > 0.04))[0]
+        print('object mask is', obj_mask.shape)
+        sample_idx = random.sample(range(len(obj_mask)-1), 10)
+        sample_idx = obj_mask[sample_idx]
+        from IPython import embed; embed()
+        point = points[sample_idx]
+        top_grasp = pred_grasps[sample_idx]
+        print('straight out the model')
+        print(top_grasp)
+        grasp_width = pred_widths[sample_idx]
+
         # transform back into the world frame
+        cam2world = np.linalg.inv(world2cam)
+        point = np.concatenate((point.detach().cpu().numpy(), np.ones((point.shape[0],1))), axis=1)
+        point = np.expand_dims(point, 2)
+        point = np.matmul(cam2world, point)
+        point = np.transpose(point, (2, 0, 1))
+        point = point[0, :, :3]
+        top_grasp = np.matmul(cam2world, top_grasp.detach().cpu().numpy())
+
+        # rotate 90 degrees about Z of gripper
+        gr = R.from_euler('z', np.pi/2, degrees=False)
+        gripper_fix = np.eye(4)
+        gripper_fix[:3, :3] = gr.as_matrix()
+        gripper_fix = np.matmul(gripper_fix, np.linalg.inv(top_grasp))
+        gripper_fix = np.matmul(top_grasp, gripper_fix)
+        top_grasp = np.matmul(gripper_fix, top_grasp)
+        
+        '''
         cam2world = np.array([self.camera.cam_ext_mat])
         top_grasp = np.matmul(cam2world, top_grasp.detach().cpu())[0]
         point = np.matmul(cam2world, np.concatenate((point.detach().cpu(), [1])))[0, :3]
-
-        from IPython import embed; embed()
+        '''
         
         return top_grasp, grasp_width.detach().cpu(), point, torch.max(pred_successes).detach().cpu()
 
@@ -332,87 +371,87 @@ class PandaPB():
         returns
             success (bool)
         '''
-        predicted_grasp, predicted_width, point, s = self.infer()
-
+        predicted_grasps, predicted_widths, points, s = self.infer()
 
         ############
         # VISUALIZATION IN OPENGL
 
-        rot = R.from_matrix(predicted_grasp[:3, :3])
+        for predicted_grasp, point, width in zip(predicted_grasps, points, predicted_widths):
 
-        quat = rot.as_quat()
-        pos = predicted_grasp[:3, -1]
-        pos[2] += 0.3
-        lift_pos = copy.deepcopy(pos)
-        lift_pos[2] += 0.3
+            rot = R.from_matrix(predicted_grasp[:3, :3])
 
-        t = pos
-        q = quat
-        collision_args = {}
-        visual_args = {}
-        panda_path = './gripper_models/panda_gripper/panda_gripper.obj'
+            quat = rot.as_quat()
+            pos = predicted_grasp[:3, -1]
+            #pos[2] += 0.3
+            lift_pos = copy.deepcopy(pos)
+            lift_pos[2] += 0.3
 
-        print(t, q)
-        collision_args['collisionFramePosition'] = None
-        collision_args['collisionFrameOrientation'] = None
-        visual_args['visualFramePosition'] = None
-        visual_args['visualFrameOrientation'] = None
+            t = pos
+            q = quat
+            collision_args = {}
+            visual_args = {}
+            panda_path = './gripper_models/panda_gripper/panda_gripper.obj'
 
-        collision_args['shapeType'] = p.GEOM_MESH
-        # collision_args['fileName'] = path                                                                                                                                           
-        collision_args['fileName'] = panda_path
-        collision_args['meshScale'] = np.array([1,1,1])
-        visual_args['shapeType'] = p.GEOM_MESH
-        # visual_args['fileName'] = path                                                                                                                                              
-        visual_args['fileName'] = panda_path
-        visual_args['meshScale'] = np.array([1,1,1])
-        visual_args['rgbaColor'] = [0, 0, 0, 0.5] #rgba                                                                                                                               
-        visual_args['specularColor'] = [0, 0.5, 0.4]#specular                                                                                                                         
+            print(t, q)
+            collision_args['collisionFramePosition'] = None
+            collision_args['collisionFrameOrientation'] = None
+            visual_args['visualFramePosition'] = None
+            visual_args['visualFrameOrientation'] = None
 
-        vs_id = p.createVisualShape(**visual_args)
-        cs_id = p.createCollisionShape(**collision_args)
-        body_id = p.createMultiBody(baseMass=1.0,
-                                       baseInertialFramePosition=None,
-                                       baseInertialFrameOrientation=None,             
-                                       baseCollisionShapeIndex=cs_id,
-                                       baseVisualShapeIndex=vs_id,
-                                       basePosition=t,
-                                       baseOrientation=q)
-                                       #**kwargs)
+            collision_args['shapeType'] = p.GEOM_MESH
+            # collision_args['fileName'] = path                                                                                                                                           
+            collision_args['fileName'] = panda_path
+            collision_args['meshScale'] = np.array([1,1,1])
+            visual_args['shapeType'] = p.GEOM_MESH
+            # visual_args['fileName'] = path                                                                                                                                              
+            visual_args['fileName'] = panda_path
+            visual_args['meshScale'] = np.array([1,1,1])
+            visual_args['rgbaColor'] = [0, 0, 0, 0.5] #rgba                                                                                                                               
+            visual_args['specularColor'] = [0, 0.5, 0.4]#specular                                                                                                                         
 
-        q = [0,0,0,1]
-        t = point
-        t[2] += 0.3
-        proj = self.camera.proj_matrix
-        
-        collision_args = {}
-        visual_args = {}
+            vs_id = p.createVisualShape(**visual_args)
+            cs_id = p.createCollisionShape(**collision_args)
+            body_id = p.createMultiBody(baseMass=1.0,
+                                           baseInertialFramePosition=None,
+                                           baseInertialFrameOrientation=None,             
+                                           baseCollisionShapeIndex=cs_id,
+                                           baseVisualShapeIndex=vs_id,
+                                           basePosition=t,
+                                           baseOrientation=q)
+                                           #**kwargs)
 
-        collision_args['collisionFramePosition'] = None
-        collision_args['collisionFrameOrientation'] = None
-        visual_args['visualFramePosition'] = None
-        visual_args['visualFrameOrientation'] = None
+            q = [0,0,0,1]
+            t = point
+            #t[2] += 0.3
 
-        collision_args['shapeType'] = p.GEOM_SPHERE
-        collision_args['radius'] = 0.01
-        visual_args['shapeType'] = p.GEOM_SPHERE
-        visual_args['radius'] = 0.01
+            collision_args = {}
+            visual_args = {}
 
-        visual_args['rgbaColor'] = [0, 0, 0, 0.5] #rgba                                  
-        visual_args['specularColor'] = [0, 0.5, 0.4]#specular
+            collision_args['collisionFramePosition'] = None
+            collision_args['collisionFrameOrientation'] = None
+            visual_args['visualFramePosition'] = None
+            visual_args['visualFrameOrientation'] = None
 
-        vs_id = p.createVisualShape(**visual_args)
-        cs_id = p.createCollisionShape(**collision_args)
-        body_id = p.createMultiBody(baseMass=1.0,
-                                       baseInertialFramePosition=None,                               
-                                       baseInertialFrameOrientation=None,
-                                       baseCollisionShapeIndex=cs_id,
-                                       baseVisualShapeIndex=vs_id,
-                                       basePosition=t,
-                                       baseOrientation=q)
-                                       #**kwargs)
+            collision_args['shapeType'] = p.GEOM_SPHERE
+            collision_args['radius'] = 0.01
+            visual_args['shapeType'] = p.GEOM_SPHERE
+            visual_args['radius'] = 0.01
 
-                                       
+            visual_args['rgbaColor'] = [0, 0, 0, 0.5] #rgba                                  
+            visual_args['specularColor'] = [0, 0.5, 0.4]#specular
+
+            vs_id = p.createVisualShape(**visual_args)
+            cs_id = p.createCollisionShape(**collision_args)
+            body_id = p.createMultiBody(baseMass=1.0,
+                                           baseInertialFramePosition=None,                               
+                                           baseInertialFrameOrientation=None,
+                                           baseCollisionShapeIndex=cs_id,
+                                           baseVisualShapeIndex=vs_id,
+                                           basePosition=t,
+                                           baseOrientation=q)
+                                           #**kwargs)
+
+
         from IPython import embed; embed()
         #####################
         
