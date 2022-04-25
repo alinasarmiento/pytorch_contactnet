@@ -542,22 +542,6 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
             width_labels.append(widths)
             success_labels.append(success)
 
-            ##################
-            # EXPERIMENTAL
-            # note: grasp width for panda is 0.08 meters
-
-            max_width = 0.08
-            num_bins = 10
-            bin_edges = torch.linspace(0, max_width, num_bins)
-            w_idcs = []
-            for w in width_labels:
-                w_bin = torch.where(w > bin_edges)[-1] # index of bin
-                w_idcs.append(w_bin)
-            width_labels = torch.nn.functional.one_hot(w_idcs)
-            ###################
-
-
-
         pose_labels = torch.Tensor(np.stack(pose_labels))
         dir_labels = torch.Tensor(np.stack(dir_labels)).float()
         width_labels = torch.Tensor(np.stack(width_labels)).float()
