@@ -1,1 +1,6 @@
-*~
+**/runs
+**/checkpoints
+*.npy
+*.npz
+*.obj
+!panda_gripper.obj
