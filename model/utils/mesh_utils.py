@@ -139,7 +139,7 @@ class PandaGripper(object):
             np.ndarray -- control points of the panda gripper 
         """
 
-        control_points = np.load(os.path.join(self.root_folder, 'gripper_control_points/panda.npy'))[:, :3]
+        control_points = np.load(os.path.join(self.root_folder, 'gripper_control_points/panda.npy'), encoding='bytes')[:, :3]
         if symmetric:
             control_points = [[0, 0, 0], control_points[1, :],control_points[0, :], control_points[-1, :], control_points[-2, :]]
         else:

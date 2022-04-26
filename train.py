@@ -124,8 +124,9 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
                     print('[Epoch: %d, Batch: %4d / %4d], Train Loss: %.3f' % (epoch + 1, (i) + 1, len(train_loader), running_loss/10))
                     #print('CONF', loss_list[0].item(), 'ADD-S', loss_list[1].item(), 'WIDTH', loss_list[2].item())
                     running_loss = 0.0
-            except:
-                print('hit an error somewhere...')
+            except Exception as e:
+                print('hit an error...')
+                print(e)
                 continue
 
         # Validation
