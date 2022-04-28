@@ -1,5 +1,3 @@
-**/runs
-**/checkpoints
 *.npy
 *.npz
 *.obj

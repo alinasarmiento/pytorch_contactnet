@@ -90,6 +90,9 @@ class ContactNet(nn.Module):
         w = width_relu(w)#.to(self.device)
         s = s.view(scalar_shape)#.to(self.device)
         w = w.view(scalar_shape)#.to(self.device)
+
+        #save first batch point cloud
+        np.save('full_pcd', points[0].cpu().detach().numpy())
         
         return points, final_grasps, s, w
                 
@@ -187,15 +190,19 @@ class ContactNet(nn.Module):
         width_loss_fn = nn.MSELoss().to(self.device)
         raw_width_loss = width_loss_fn(pred_width, width_labels)#nn.BCEWithLogitsLoss(pred_width, width_labels)
         width_loss = raw_width_loss #np.mean(masked_width_loss)        
-            
+
+        ############# VISUALIZATION
         # create a predicted success mask (above a threshold)
         success_threshold = 0.5
         pred_s_grasp_list = []
+        pred_s_mask_list = []
         for batch, pred_success_list in enumerate(pred_success):
             pred_success_mask = np.argwhere((pred_success_list.detach().cpu().numpy() > success_threshold))
-            #print(pred_success_mask.shape)
             pred_s_grasps = pred_grasps[batch, pred_success_mask, :4, :4]
             pred_s_grasp_list.append(pred_s_grasps[:, 0, :, :])
+            pred_s_mask_list.append(pred_success_mask)
+
+        np.save('pred_s_mask', pred_success[0].detach().cpu().numpy()) #pred_s_mask_list[0])
             
         label_pts_list = []
         pred_pts_list = []
@@ -252,7 +259,7 @@ class ContactNet(nn.Module):
         # -- APPROACH AND BASELINE LOSSES --
         # currently not used
 
-        total_loss = self.config['loss']['conf_mult']*conf_loss + self.config['loss']['add_s_mult']*add_s_loss + self.config['loss']['width_mult']*width_loss
+        total_loss = self.config['loss']['conf_mult']*conf_loss + 0*self.config['loss']['add_s_mult']*add_s_loss + 0*self.config['loss']['width_mult']*width_loss
         print(conf_loss.item(), add_s_loss.item(), width_loss.item())
 
         return conf_loss, add_s_loss, width_loss, total_loss #, approach_loss, baseline_loss
