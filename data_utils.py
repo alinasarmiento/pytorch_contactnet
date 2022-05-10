@@ -477,7 +477,7 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
         radius = data_config['max_radius']
         filter_z = data_config['filter_z']
         z_val = data_config['z_val']
-        b, N = data_config['batch_size'], obs_pcds.shape[1] #data_config['num_points']
+        b, N = pos_contact_pts_mesh.shape[0], obs_pcds.shape[1] #data_config['num_points']
         pos_contact_pts_mesh = pos_contact_pts_mesh.reshape(b, -1, 3)
         dir_labels = []
         approach_labels = []

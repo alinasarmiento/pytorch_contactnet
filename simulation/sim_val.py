@@ -83,7 +83,7 @@ class PandaPB():
         '''
         Returns a random scene from the ShapeNet generated scenes folder
         '''
-        scene_idx = np.random.randint(0, len(self.dataset.data))
+        scene_idx = 2 #np.random.randint(0, len(self.dataset.data))
         data_file = self.dataset.data[scene_idx]
         filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
         scene_data = np.load(filename, allow_pickle=True)
@@ -291,10 +291,15 @@ class PandaPB():
         pcd = pcd[idx.detach().cpu().numpy()]
         obj_mask = np.where((pcd[:, 2] > 0.04))[0]
         print('object mask is', obj_mask.shape)
-        sample_idx = random.sample(range(len(obj_mask)-1), 10)
-        sample_idx = obj_mask[sample_idx]
+        obj_success = pred_successes[obj_mask]
+        success, sample_idx = torch.topk(obj_success, 10)
+
+        #sample_idx = torch.where(pred_successes>0.04)[0].detach().cpu().numpy()
+        ##sample_idx=random.sample(range(len(obj_mask)-1), 10)
+        ##sample_idx = obj_mask[sample_idx]
+        #sample_idx = np.intersect1d(obj_mask, sample_idx)
         from IPython import embed; embed()
-        point = points[sample_idx]
+        point = points[sample_idx[:10]]
         top_grasp = pred_grasps[sample_idx]
         print('straight out the model')
         print(top_grasp)
@@ -323,7 +328,7 @@ class PandaPB():
         point = np.matmul(cam2world, np.concatenate((point.detach().cpu(), [1])))[0, :3]
         '''
         
-        return top_grasp, grasp_width.detach().cpu(), point, torch.max(pred_successes).detach().cpu()
+        return top_grasp, grasp_width.detach().cpu(), point, pred_successes #torch.max(pred_successes).detach().cpu()
 
     def check_collision(self):
         pb_client = get_client()
@@ -478,7 +483,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     contactnet, optim, config = initialize_net(args.config_path, load_model=True, save_path=args.save_path)
-    #from IPython import embed; embed()
     dataset = ContactDataset(args.data_path, config['data'])
     panda_pb = PandaPB(contactnet, dataset, config)
     successful = panda_pb.pb_execute()

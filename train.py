@@ -5,6 +5,7 @@ import argparse
 import numpy as np
 import math
 import time
+import traceback
 
 import torch
 print(os.getcwd())
@@ -17,8 +18,8 @@ from torch.utils.tensorboard import SummaryWriter
 import copy
 from torch_geometric.nn import fps
 
-def initialize_loaders(data_pth, data_config, include_val=False):
-    train_loader = get_dataloader(data_pth, data_config)
+def initialize_loaders(data_pth, data_config, size=None, include_val=False):
+    train_loader = get_dataloader(data_pth, size=size, data_config=data_config)
     if include_val:
         val_loader = get_dataloader(data_pth, data_config)
     else:
@@ -76,6 +77,7 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
 
                     gt_points = gt_dict['contact_pts']
                     pcd_shape_batched = (gt_points.shape[0], gt_points.shape[2], -1)
+                    #print('pcd shape is', pcd_shape_batched)
                     gt_points = gt_points.view(pcd_shape_batched) #.to(model.device)
                     grasp_poses, success_idxs, base_dirs, width, success, approach_dirs = compute_labels(gt_points,
                                                                                             expanded_pcd[:, :, :3],
@@ -151,11 +153,13 @@ if __name__=='__main__':
     parser.add_argument('--root_path', type=str, default='/home/alinasar/pytorch_contactnet/', help='root path to repo')
     parser.add_argument('--load_model', type=bool, default=False, help='whether to load saved model, specified with --load_path (otherwise will rewrite)')
     parser.add_argument('--load_path', type=str, default='', help='what path to load the saved model from')
+    parser.add_argument('--trainset_size', type=int, default=None, help='size of the train set. if None, will use the entire set (10k cluttered scenes)')
     #parser.add_argument('--i', type=int, default=0, help='sample num to start on')
+    parser.add_argument('--coupled', type=bool, default=True, help='whether or not to couple the add-s and success multiheads')
     args = parser.parse_args()
     
     contactnet, optimizer, config= initialize_net(args.config_path, args.load_model, args.load_path)
     data_config = config['data']
-    train_loader, val_loader = initialize_loaders(args.data_path, data_config)
+    train_loader, val_loader = initialize_loaders(args.data_path, data_config, size=args.trainset_size)
 
     train(contactnet, optimizer, config, train_loader, val_loader, args.epochs, args.save_data, args.save_path, args)

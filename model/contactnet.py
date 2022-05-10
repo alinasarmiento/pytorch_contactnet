@@ -22,7 +22,9 @@ class ContactNet(nn.Module):
         super().__init__()
         self.config = config
         self.device = device
-        self.set_abstract = self.SAnet(config['model']['sa'])
+        self.feat_cat_list = [0]
+        self.set_abstract_msg = self.SAnet_msg(config['model']['sa']) #set abstraction with multi-scale grouping
+        self.set_abstract_final = self.SAnet(config['model']['sa_final']) #final set abstraction model without multi-scale grouping
         self.feat_prop = self.FPnet(config['model']['fp'])
         self.multihead = self.Multihead(config['model']['multi'])
         
@@ -41,11 +43,9 @@ class ContactNet(nn.Module):
         input_list = (sample_pts, pos, batch)
 
         skip_layers = [input_list]
-        for mod_idx, module_list in enumerate(self.set_abstract):
-            
+        for mod_idx, module_list in enumerate(self.set_abstract_msg):
             feature_cat = torch.Tensor().to(self.device)
             for i, module in enumerate(module_list):
-                
                 if (i==0) and (mod_idx!=0):    # sample down point list (beginning of every module except very first one in network)
                     feat, pos, batch, idx = module(*input_list)
                 else:
@@ -55,9 +55,11 @@ class ContactNet(nn.Module):
             input_list = (feature_cat, pos, batch)
             skip_layers.insert(0, input_list)
             
+        # final SA module (no multi-scale grouping)
+        feat = self.set_abstract_final(input_list[0])
+        skip_layers.insert(0, (feat, input_list[1], input_list[2]))
 
-        for module, skip in zip(self.feat_prop, skip_layers):
-            #print('MODULE FEAT PROP')
+        for module, skip in zip(self.feat_prop, skip_layers[1:]):
             input_list = module(*input_list, *skip)
         point_features =  input_list[0]  #pointwise features
         
@@ -76,7 +78,7 @@ class ContactNet(nn.Module):
         
         # build final grasps
         final_grasps = self.build_6d_grasps(points, z1, z2, w, self.config['gripper_depth'], width_labels)
-        #final_grasps = torch.Tensor(final_grasps)
+
         # unsqueeze point features and points into batches
         num_batches = int(torch.max(input_list[2]))+1
         pts_shape = (num_batches, input_list[1].shape[0]//num_batches, -1)
@@ -93,7 +95,6 @@ class ContactNet(nn.Module):
 
         #save first batch point cloud
         np.save('full_pcd', points[0].cpu().detach().numpy())
-        
         return points, final_grasps, s, w
                 
     def filter_segment(self, seg_mask, grasps):
@@ -150,6 +151,20 @@ class ContactNet(nn.Module):
         # Use binary cross entropy loss on predicted success to find top-k preds with largest loss
         conf_loss_fn = nn.BCELoss(reduction='none').to(self.device)
         conf_loss = torch.mean(torch.topk(conf_loss_fn(pred_success, success_labels), k=512)[0]).to(self.device)
+
+        #############                                                                                                                                                                   
+        # experimental                                                                                                                                                                  
+        '''
+        pos_conf_lossfn = nn.BCELoss(reduction='none').to(self.device)
+        pos_s = torch.where(success_labels==1)
+        pos_s_labels = success_labels[pos_s]
+        pos_s_pred = pred_success[pos_s]
+        pos_s_loss = torch.mean(pos_conf_lossfn(pos_s_pred, pos_s_labels)).to(self.device)
+
+        conf_loss = 0.7*conf_loss_pure + 0.3*pos_s_loss
+        '''
+        #############
+
         
         # -- GEOMETRIC LOSS --
         # Turn each gripper control point into a pose object
@@ -252,26 +267,29 @@ class ContactNet(nn.Module):
             norm_1 = torch.linalg.norm((pred_pts - label_pts_1), dim=(1,2))
             norm_2 = torch.linalg.norm((pred_pts - label_pts_2), dim=(1,2))
             min_norm = torch.min(norm_1, norm_2)
-            add_s_loss = pred_success_masked*min_norm
+            if args.coupled==True:
+                add_s_loss = pred_success_masked*min_norm
+            else:
+                add_s_loss = min_norm
 
             add_s_loss = torch.mean(add_s_loss).to(self.device)
 
         # -- APPROACH AND BASELINE LOSSES --
         # currently not used
 
-        total_loss = self.config['loss']['conf_mult']*conf_loss + 0*self.config['loss']['add_s_mult']*add_s_loss + 0*self.config['loss']['width_mult']*width_loss
+        total_loss = self.config['loss']['conf_mult']*conf_loss + self.config['loss']['add_s_mult']*add_s_loss + self.config['loss']['width_mult']*width_loss
         print(conf_loss.item(), add_s_loss.item(), width_loss.item())
 
         return conf_loss, add_s_loss, width_loss, total_loss #, approach_loss, baseline_loss
         
-    def SAnet(self, cfg):
+    def SAnet_msg(self, cfg):
         '''
-        part of the net that downsizes the pointcloud
+        part of the net that compresses the pointcloud while increasing per-point feature size
         
         cfg: config dict
             radii - nested list of radii for each level
             centers - list of number of neighborhoods to sample for each level
-            mlps - list of lists of mlp layers for each level, first mlp must start with in_dimension
+            mlps - list of lists of mlp layers for each level
         '''
         sa_modules = nn.ModuleList()
         input_size = 0
@@ -279,17 +297,28 @@ class ContactNet(nn.Module):
         for r_list, center, mlp_list in zip(cfg['radii'], cfg['centers'], cfg['mlps']):
             layer_modules = []
             feat_cat_size = 0
-            input_size += 3
             for r, mlp_layers in zip(r_list, mlp_list):
-                mlp_layers.insert(0, input_size)
+                mlp_layers.insert(0, input_size+3)
                 module = SAModule((center/num_points), r, MLP(mlp_layers)).to(self.device)
                 layer_modules.append(copy.deepcopy(module))
                 feat_cat_size += mlp_layers[-1] #keep track of how big the concatenated feature vector is for MSG
             num_points = center
             input_size = feat_cat_size
+            self.feat_cat_list.insert(0, feat_cat_size)
             sa_modules.append(nn.ModuleList(copy.deepcopy(layer_modules)))
         return sa_modules
+
+    def SAnet(self, cfg):
+        '''
+        final module of the set aggregation section
+        does not use multi-scale grouping (essentially one MLP applied to the final 128 centers)
         
+        cfg: config dict
+            mlp - list of mlp layers including input size of 640
+        '''
+        sa_module = MLP(cfg['mlp'])
+        return sa_module
+    
     def FPnet(self, cfg):
         '''
         part of net that upsizes the pointcloud
@@ -299,8 +328,12 @@ class ContactNet(nn.Module):
             nnlist - list of unit pointclouds to run between feat prop layers
         '''
         fp_modules = nn.ModuleList()
-        for k, layer_list in zip(cfg['klist'], cfg['nnlist']):
-            module = FPModule(k, MLP(layer_list))
+        input_size = self.feat_cat_list[0]
+        for i, layer_list in enumerate(cfg['nnlist']):
+            input_size += self.feat_cat_list[i]
+            layer_list.insert(0, input_size)
+            module = FPModule(3, MLP(layer_list)) # 3 is k in knn interpolate (interpolate from 3 nearest centers)
+            input_size = layer_list[-1]
             fp_modules.append(module)
         return fp_modules
 
@@ -316,7 +349,7 @@ class ContactNet(nn.Module):
         '''
         head_list = nn.ModuleList()
         for out_dim, p in zip(cfg['out_dims'], cfg['ps']):
-            head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim'], 128, 1),
+            head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim']+3, 128, 1),
                                  nn.BatchNorm1d(128),
                                  nn.Dropout(p),
                                  nn.Conv1d(128, out_dim, 1)).to(self.device)

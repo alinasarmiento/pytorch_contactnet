@@ -47,7 +47,8 @@ def meshcat_pcd_show(mc_vis, point_cloud, color=None, name=None):
 
 def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
     """
-    shows a sample grasp as represented by a bounding box
+    shows a sample grasp as represented by a little fork guy
+    freq: show one grasp per every (freq) grasps (1/freq is ratio of visualized grasps)
     """
     if name is None:
         name = 'scene/loop/'
@@ -66,18 +67,17 @@ def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
             #mc_vis[name_i+'wrist'].set_object(g.Line(g.PointsGeometry(wrist)))
 
 def visualize(args):
-    #control_expanded = np.load('control_pt_list_many.npy')
-    #label_expanded = np.load('label_pt_list_many.npy')
-    #s_grasp_expanded = np.load('success_pt_list_many.npy')
-    #pybullet = np.load('pybullet_pcd.npy')
-    #p = np.load('first_pcd_many.npy')
-    vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6001')
+    vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
     vis['scene'].delete()
     print('MeshCat URL: %s' % vis.url())
 
-    success_mask = np.load('pred_s_mask.npy')
+    threshold = 0.05
+    pred_s = np.load('pred_s_mask.npy')
+    print(pred_s)
+    success_mask = np.where(pred_s > threshold)
     pcd = np.load('full_pcd.npy')
-    #s_pcd = pcd[success_mask]
+    print(pred_s.shape, pcd.shape)
+    s_pcd = pcd[success_mask]
     print(success_mask)
     green = np.zeros_like(s_pcd)
     green[:, 1] = 255*np.ones_like(s_pcd)[:,1]
@@ -91,20 +91,6 @@ def visualize(args):
     green_color[:, 1] = 255*np.ones_like(pos_labeled)[:, 1]
     white_color = 255*np.ones_like(pred_s_pcd)
     '''
-    #sample_grasp_show(vis, control_expanded, name='scene/control_loops/')
-    #sample_grasp_show(vis, label_expanded, name='scene/label_gripper/')
-    #sample_grasp_show(vis, s_grasp_expanded, name='scene/success_masked/', freq=100)
-
-    ##meshcat_pcd_show(vis, pybullet, name='scene/pb')
-    ##meshcat_pcd_show(vis, p, name='scene/pcd')
-    #meshcat_pcd_show(vis, gt_pcd,  name='scene/gt')
-    #meshcat_pcd_show(vis, obs_pcd, name='scene/obs')
-    #meshcat_pcd_show(vis, control_label_pcd, name='scene/control_pts')
-    #meshcat_pcd_show(vis, control_2, name='scene/control_pts_2')
-    #meshcat_pcd_show(vis, first_pcd, name='scene/first_pcd')
-    #meshcat_pcd_show(vis, pred_s_pcd, name='scene/pred_s') #, color=white_color)
-    #meshcat_pcd_show(vis, pos_pcd, name='scene/pos_pcd', color=obs_color.T)
-    #meshcat_pcd_show(vis, pos_labeled, name='scene/pos_labeled', color=green_color.T)
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

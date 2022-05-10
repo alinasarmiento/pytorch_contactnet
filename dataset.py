@@ -8,8 +8,8 @@ from torch.utils.data import DataLoader, Dataset
 from scipy.spatial import KDTree, cKDTree
 from scipy.spatial.transform import Rotation as R
 
-def get_dataloader(data_path, data_config=None):
-    dataset = ContactDataset(data_path, data_config, overfit_test=False)
+def get_dataloader(data_path, size=None, data_config=None):
+    dataset = ContactDataset(data_path, data_config, size=size, overfit_test=False)
     dataloader = DataLoader(dataset, shuffle=True, batch_size=data_config['batch_size'])
     return dataloader
 
@@ -28,12 +28,15 @@ def crop_pcd(pointcloud, center, save_name, radius=0.5):
     return cropped_pcd, indices
 
 class ContactDataset(Dataset):
-    def __init__(self, data_path, data_config, overfit_test=True):
+    def __init__(self, data_path, data_config, size=None, overfit_test=True):
         self.data = []
         self.data_config = data_config
         data_path = os.fsencode(data_path)
         self.pcreader = data_utils.PointCloudReader(data_path, data_config['batch_size'], pc_augm_config=data_config['pc_augm'], depth_augm_config=data_config['depth_augm'])
-        self.data = os.listdir(data_path)
+        if size is None:
+            self.data = os.listdir(data_path)
+        else:
+            self.data = os.listdir(data_path)[:(size+1)]
         self.overfit_test = overfit_test
         if self.overfit_test:
             data_file = self.data[1]
