@@ -69,11 +69,17 @@ def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
 def visualize(args):
     vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
     vis['scene'].delete()
+    vis.delete()
     print('MeshCat URL: %s' % vis.url())
 
-    threshold = 0.05
+    cam_pose = np.load('cam_pose.npy')
+    box = meshcat.geometry.Box([0.1, 0.2, 0.3])
+    vis['scene/cam'].set_object(box)
+    vis['scene/cam'].set_transform(cam_pose)
+    
+    threshold = 0.2
     pred_s = np.load('pred_s_mask.npy')
-    print(pred_s)
+    print(np.max(pred_s))
     success_mask = np.where(pred_s > threshold)
     pcd = np.load('full_pcd.npy')
     print(pred_s.shape, pcd.shape)
@@ -81,9 +87,18 @@ def visualize(args):
     print(success_mask)
     green = np.zeros_like(s_pcd)
     green[:, 1] = 255*np.ones_like(s_pcd)[:,1]
+
+    pc_world = np.load('world_pc.npy')
+    pc_cam = np.load('cam_pc.npy')
+    grasps = np.load('control_pt_list.npy')
+    grasp_labels = np.load('label_pt_list.npy')
+    
     meshcat_pcd_show(vis, pcd, name='scene/full_pcd')
     meshcat_pcd_show(vis, s_pcd, name='scene/s_pcd', color=green.T)
-    
+    meshcat_pcd_show(vis, pc_world, name='scene/world')
+    meshcat_pcd_show(vis, pc_cam, name='scene/pc_cam')
+    sample_grasp_show(vis, grasps, name='pred/', freq=1)
+    sample_grasp_show(vis, grasp_labels, name='label/', freq=1)
     '''
     obs_color = np.zeros_like(pos_pcd)
     obs_color[:, 0] = 255*np.ones_like(pos_pcd)[:, 0]

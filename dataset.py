@@ -1,4 +1,5 @@
 import os
+import copy
 import sys
 import numpy as np
 from numpy import load
@@ -84,6 +85,20 @@ class ContactDataset(Dataset):
         #if not self.overfit_test:
         self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
         self.pc_cam, self.pc_normals, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True, camera_pose=None) #self.camera_pose
+        print(self.camera_pose)
+        pc_hom = np.concatenate((self.pc_cam, np.ones((self.pc_cam.shape[0], 1))), 1).T
+        print(pc_hom.shape)
+        #pc_hom[:, 2] = -pc_hom[:, 2]
+        xr = R.from_euler('x', np.pi, degrees=False)
+        x_rot = np.eye(4)
+        x_rot[:3, :3] = xr.as_matrix()
+        camera = copy.deepcopy(self.camera_pose)
+        self.pc = np.dot(x_rot, pc_hom)
+        self.pc = np.dot(camera, self.pc).T
+
+        np.save('world_pc', self.pc)
+        np.save('cam_pc', self.pc_cam)
+        np.save('cam_pose', self.camera_pose)
 
         '''
         pcd_mean = np.mean(self.pc_cam, axis=0)
@@ -106,8 +121,9 @@ class ContactDataset(Dataset):
         self.gt_contact_info['offsets'] = self.gt_contact_info['offsets'][:, crop_idcs]
         self.gt_contact_info['idcs'] = crop_idcs
         '''
-        pcd = self.pc_cam[:, :3]
+        pcd = self.pc[:, :3]
         pcd_normals = self.pc_normals[:, :3]
+        from IPython import embed; embed()
         
         return torch.Tensor(pcd).float(), torch.Tensor(pcd_normals).float(), self.camera_pose, self.gt_contact_info
 

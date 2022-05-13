@@ -245,12 +245,13 @@ class ContactNet(nn.Module):
             pred_pts_list.append(pred_pts)
             s_pts_list.append(pred_s_pts)
 
-        '''
+        
         pred_pts1 = pred_pts_list[0][:,:,:3]
         pred_pts2 = pred_pts_list[1][:,:,:3]
-        np.save('visualization/control_pt_list_many', pred_pts1.detach().cpu().numpy())
+        np.save('control_pt_list', pred_pts1.detach().cpu().numpy())
         label_pts1 = label_pts_list[0][0][:,:,:3]
-        np.save('visualization/label_pt_list_many', label_pts1.detach().cpu().numpy())
+        np.save('label_pt_list', label_pts1.detach().cpu().numpy())
+        '''
         pred_s_pts = s_pts_list[0][:,:,:3]
         np.save('visualization/success_pt_list_many', pred_s_pts.detach().cpu().numpy())
         '''
