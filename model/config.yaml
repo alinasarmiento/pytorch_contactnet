@@ -73,10 +73,11 @@ model:
       - 0.7
       - 0.7
       - 0
-gripper_depth: 0.08
+gripper_depth: 0.1034
 loss:
   conf_mult: 1
-  add_s_mult: 10
+  add_s_mult: 1000
+  appr_vec_mult: 0
   width_mult: 1
 data:
   pc_augm:
@@ -89,8 +90,8 @@ data:
     clip: 0.005
     gaussian_kernel: 0
   labels:
-    num_pos_contacts: 10000
-  k: 2
+    num_pos_contacts: 8000
+  k: 1
   max_radius: .005
   filter_z: True
   z_val: -0.1

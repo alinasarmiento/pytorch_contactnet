@@ -6,9 +6,5 @@ pyyaml
 scipy
 trimesh
 pyrender
-torch-geometric
-torch-sparse
-torch-scatter
-torch-cluster
 python-fcl
 tensorboard

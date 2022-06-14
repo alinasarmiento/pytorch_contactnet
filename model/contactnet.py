@@ -15,7 +15,7 @@ import model.utils.pcd_utils as utils
 import model.utils.mesh_utils as mesh_utils
 sys.path.append('../pointnet2')
 from pointnet2.models_pointnet import FPModule, SAModule, MLP
-
+from test_meshcat_pcd import viz_pcd as V
 
 class ContactNet(nn.Module):
     def __init__(self, config, device):
@@ -25,8 +25,8 @@ class ContactNet(nn.Module):
         self.feat_cat_list = [0]
         self.set_abstract_msg = self.SAnet_msg(config['model']['sa']) #set abstraction with multi-scale grouping
         self.set_abstract_final = self.SAnet(config['model']['sa_final']) #final set abstraction model without multi-scale grouping
-        self.feat_prop = self.FPnet(config['model']['fp'])
-        self.multihead = self.Multihead(config['model']['multi'])
+        self.feat_prop = self.FPnet(config['model']['fp']) #feature propagation 
+        self.multihead = self.Multihead(config['model']['multi']) #final multihead for 2 vectors, confidence, and width
         
     def forward(self, input_pcd, pos, batch, idx, k=None, width_labels=None):
         '''
@@ -37,11 +37,12 @@ class ContactNet(nn.Module):
         Returns
             list of grasps (4x4 numpy arrays)
         '''
+        # Step 1: PointNet++ Set Aggregation (with multi-scale grouping)
+
         sample_pts = input_pcd.float()
         if k is not None:
             sample_pts = utils.farthest_point_downsample(input_pcd, k)
         input_list = (sample_pts, pos, batch)
-
         skip_layers = [input_list]
         for mod_idx, module_list in enumerate(self.set_abstract_msg):
             feature_cat = torch.Tensor().to(self.device)
@@ -51,30 +52,35 @@ class ContactNet(nn.Module):
                 else:
                     feat, pos, batch, idx = module(*input_list, sample=False, idx=idx)
                 feature_cat = torch.cat((feature_cat, feat), 1)
-            
             input_list = (feature_cat, pos, batch)
             skip_layers.insert(0, input_list)
-            
         # final SA module (no multi-scale grouping)
         feat = self.set_abstract_final(input_list[0])
         skip_layers.insert(0, (feat, input_list[1], input_list[2]))
 
+
+        # Step 2: PointNet++ Feature Propagation
+
         for module, skip in zip(self.feat_prop, skip_layers[1:]):
             input_list = module(*input_list, *skip)
         point_features =  input_list[0]  #pointwise features
-        
         points = input_list[1]
-        
         point_features = torch.cat((points, point_features), 1)
         point_features = torch.unsqueeze(point_features, 0)
         point_features = point_features.transpose(1, 2)
-        # feed into final multihead
+
+        
+        # Step 3: Final Multihead Output
+
         finals = []
         for net in self.multihead:
             result = torch.flatten(net(point_features).transpose(1,2), start_dim=0, end_dim=1)
             finals.append(result)
-        
         s, z1, z2, w = finals # confidence prediction, grasp vector 1, grasp vector 2, grasp width
+
+        z1 = z1/torch.linalg.norm(z1, dim=1, keepdim=True)
+        z2 = z2 - torch.sum(z1*z2, dim=-1, keepdim=True)*z1
+        z2 = z2/torch.linalg.norm(z2, dim=1, keepdim=True)
         
         # build final grasps
         final_grasps = self.build_6d_grasps(points, z1, z2, w, self.config['gripper_depth'], width_labels)
@@ -84,6 +90,7 @@ class ContactNet(nn.Module):
         pts_shape = (num_batches, input_list[1].shape[0]//num_batches, -1)
         grasp_shape = (num_batches, input_list[1].shape[0]//num_batches, 4, 4)
         scalar_shape = (num_batches, input_list[1].shape[0]//num_batches)
+
         points = input_list[1].view(pts_shape).to(self.device)
         final_grasps = final_grasps.view(grasp_shape).to(self.device)
         success_sigmoid = nn.Sigmoid().to(self.device)
@@ -92,9 +99,8 @@ class ContactNet(nn.Module):
         w = width_relu(w)#.to(self.device)
         s = s.view(scalar_shape)#.to(self.device)
         w = w.view(scalar_shape)#.to(self.device)
-
+        
         #save first batch point cloud
-        np.save('full_pcd', points[0].cpu().detach().numpy())
         return points, final_grasps, s, w
                 
     def filter_segment(self, seg_mask, grasps):
@@ -104,7 +110,7 @@ class ContactNet(nn.Module):
         filtered_grasps = grasps[seg_mask]
         return filtered_grasps
 
-    def build_6d_grasps(self, contact_pts, z1, z2, w, gripper_depth, width_labels=None):
+    def build_6d_grasps(self, contact_pts, z1, z2, w, gripper_depth=0.1034, width_labels=None):
         '''
         builds full 6 dimensional grasps based on generated vectors, width, and pointcloud
         '''
@@ -113,7 +119,7 @@ class ContactNet(nn.Module):
         inner = torch.sum((base_dirs * z2), dim=1)
         prod = torch.unsqueeze(inner, -1)*base_dirs
         approach_dirs = (z2 - prod)/(torch.unsqueeze(torch.linalg.norm(z2, dim=1), dim=0).transpose(0, 1))
-        
+
         # build grasps
         grasps = []
         for i in range(len(contact_pts)):
@@ -122,10 +128,8 @@ class ContactNet(nn.Module):
             grasp[:3,2] = approach_dirs[i] / torch.linalg.norm(approach_dirs[i])
             grasp_y = torch.cross( grasp.clone()[:3,2],grasp.clone()[:3,0])
             grasp[:3,1] = grasp_y / torch.linalg.norm(grasp_y)
-            #print(w[i])
-            #print((w[i]/2).cpu()*grasp.clone()[:3,0])
-            grasp[:3,3] = contact_pts[i] + (w[i]/2)*grasp.clone()[:3,0].to(self.device) - gripper_depth*grasp.clone()[:3,2].to(self.device)
 
+            grasp[:3,3] = contact_pts[i] - gripper_depth*grasp.clone()[:3,2].to(self.device) + (w[i]/2)*grasp.clone()[:3,0].to(self.device)
             grasps.append(grasp)
             
         grasps = torch.stack(grasps).to(self.device)
@@ -144,7 +148,7 @@ class ContactNet(nn.Module):
         grasp_labels = labels_dict['grasps']
         width_labels = labels_dict['width']
         success_labels = success_labels.reshape(success_labels.shape[0], -1) #np.transpose(success_labels, axes=(0,2,1))
-       
+        
         success_labels = torch.Tensor(success_labels).to(self.device)            
 
         # -- GRASP CONFIDENCE LOSS --
@@ -182,7 +186,6 @@ class ContactNet(nn.Module):
                 idx_list = idx_list.T
                 point_idxs = idx_list[0]
                 label_idxs = idx_list[1]
-
                 pos_labels = grasp_labels[batch, label_idxs, :4, :4]
                 pos_pred = pred_grasps[batch, point_idxs, :4, :4]
                 width_labels_masked = width_labels[batch, point_idxs]
@@ -199,6 +202,8 @@ class ContactNet(nn.Module):
         # -- WIDTH LOSS --
         # calculates loss on 10 grasp width bins using a sigmoid fn and binary cross entropy
 
+        
+        
         width_labels = torch.Tensor(np.array(width_labels)).to(self.device)
         width_labels = width_labels.reshape(width_labels.shape[0], -1)
 
@@ -208,7 +213,7 @@ class ContactNet(nn.Module):
 
         ############# VISUALIZATION
         # create a predicted success mask (above a threshold)
-        success_threshold = 0.5
+        success_threshold = 0.19
         pred_s_grasp_list = []
         pred_s_mask_list = []
         for batch, pred_success_list in enumerate(pred_success):
@@ -217,38 +222,41 @@ class ContactNet(nn.Module):
             pred_s_grasp_list.append(pred_s_grasps[:, 0, :, :])
             pred_s_mask_list.append(pred_success_mask)
 
-        np.save('pred_s_mask', pred_success[0].detach().cpu().numpy()) #pred_s_mask_list[0])
+        np.save('pred_s_mask', pred_success[0].detach().cpu().numpy())
             
         label_pts_list = []
         pred_pts_list = []
-        s_pts_list = []
+        #s_pts_list = []
         gripper_object = mesh_utils.create_gripper('panda', root_folder=args.root_path)
 
         for pos_labels, pos_pred, pred_s_grasps in zip(pos_label_list, pos_pred_list, pred_s_grasp_list):
 
             gripper_np = gripper_object.get_control_point_tensor(pos_labels.shape[0])
             sym_gripper_np = gripper_object.get_control_point_tensor(pos_labels.shape[0], symmetric=True)
-            success_mask_gripper = gripper_object.get_control_point_tensor(pred_s_grasps.shape[0])
             hom = np.ones((gripper_np.shape[0], gripper_np.shape[1], 1))
             gripper_pts = torch.Tensor(np.concatenate((gripper_np, hom), 2)).transpose(1,2).to(self.device)
             sym_gripper_pts = torch.Tensor(np.concatenate((sym_gripper_np, hom), 2)).transpose(1,2).to(self.device)
-
-            hom2 = np.ones((success_mask_gripper.shape[0], success_mask_gripper.shape[1], 1))
-            sm_gripper_pts = torch.Tensor(np.concatenate((success_mask_gripper, hom2), 2)).transpose(1,2).to(self.device)
+            
+            #success_mask_gripper = gripper_object.get_control_point_tensor(pred_s_grasps.shape[0])
+            #hom2 = np.ones((success_mask_gripper.shape[0], success_mask_gripper.shape[1], 1))
+            #sm_gripper_pts = torch.Tensor(np.concatenate((success_mask_gripper, hom2), 2)).transpose(1,2).to(self.device)
+            #pred_s_pts = torch.matmul(pred_s_grasps, sm_gripper_pts).transpose(1,2)
+            #s_pts_list.append(pred_s_pts)
             
             label_pts = torch.matmul(pos_labels, gripper_pts).transpose(1,2)
             sym_label_pts = torch.matmul(pos_labels, sym_gripper_pts).transpose(1,2)
             pred_pts = torch.matmul(pos_pred, gripper_pts).transpose(1,2)
-            pred_s_pts = torch.matmul(pred_s_grasps, sm_gripper_pts).transpose(1,2)
+
             
             label_pts_list.append([label_pts, sym_label_pts])
             pred_pts_list.append(pred_pts)
-            s_pts_list.append(pred_s_pts)
 
         
         pred_pts1 = pred_pts_list[0][:,:,:3]
-        pred_pts2 = pred_pts_list[1][:,:,:3]
+        print('pred pts', pred_pts1.shape)
+        #pred_pts2 = pred_pts_list[1][:,:,:3]
         np.save('control_pt_list', pred_pts1.detach().cpu().numpy())
+        V(pred_pts1.detach().cpu().numpy(), 'pred/', grasps=True)
         label_pts1 = label_pts_list[0][0][:,:,:3]
         np.save('label_pt_list', label_pts1.detach().cpu().numpy())
         '''
@@ -256,7 +264,7 @@ class ContactNet(nn.Module):
         np.save('visualization/success_pt_list_many', pred_s_pts.detach().cpu().numpy())
         '''
         # Compare symmetric predicted and label control points to calculate "add-s" loss
-
+        add_s_loss_total = torch.Tensor([0]).to(self.device)
         for success_idx, pred_success_list, pred_pts, label_pts in zip(success_idxs, pred_success, pred_pts_list, label_pts_list):
             point_success_mask = success_idx[:, 0]
             pred_pts = pred_pts[:, :, :3]
@@ -265,23 +273,30 @@ class ContactNet(nn.Module):
 
             pred_success_masked = pred_success_list[point_success_mask]
 
-            norm_1 = torch.linalg.norm((pred_pts - label_pts_1), dim=(1,2))
-            norm_2 = torch.linalg.norm((pred_pts - label_pts_2), dim=(1,2))
+            norm_1 = torch.mean(torch.linalg.norm((pred_pts - label_pts_1), dim=2), dim=1)
+            norm_2 = torch.mean(torch.linalg.norm((pred_pts - label_pts_2), dim=2), dim=1)
             min_norm = torch.min(norm_1, norm_2)
-            if args.coupled==True:
+            
+            if args.uncoupled==False:
                 add_s_loss = pred_success_masked*min_norm
             else:
                 add_s_loss = min_norm
 
-            add_s_loss = torch.mean(add_s_loss).to(self.device)
+            add_s_loss_total += torch.mean(add_s_loss).to(self.device)
 
         # -- APPROACH AND BASELINE LOSSES --
-        # currently not used
+        total_appr_loss = torch.Tensor([0]).to(self.device)
+        for pos_labels, pos_pred in zip(pos_label_list, pos_pred_list):
+            a_labels = pos_labels[:, :3, 2]
+            a_pred = pos_pred[:, :3, 2]
+            appr_loss = torch.linalg.norm(a_pred - a_labels, axis=1)
+            total_appr_loss += torch.mean(appr_loss)
 
-        total_loss = self.config['loss']['conf_mult']*conf_loss + self.config['loss']['add_s_mult']*add_s_loss + self.config['loss']['width_mult']*width_loss
-        print(conf_loss.item(), add_s_loss.item(), width_loss.item())
+        total_loss = self.config['loss']['conf_mult']*conf_loss + self.config['loss']['add_s_mult']*add_s_loss_total + self.config['loss']['width_mult']*width_loss \
+                     + self.config['loss']['appr_vec_mult']*total_appr_loss
+        print(conf_loss.item(), add_s_loss_total.item(), width_loss.item())
 
-        return conf_loss, add_s_loss, width_loss, total_loss #, approach_loss, baseline_loss
+        return conf_loss, add_s_loss_total, width_loss, total_appr_loss, total_loss #, approach_loss, baseline_loss
         
     def SAnet_msg(self, cfg):
         '''

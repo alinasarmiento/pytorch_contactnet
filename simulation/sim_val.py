@@ -83,7 +83,7 @@ class PandaPB():
         '''
         Returns a random scene from the ShapeNet generated scenes folder
         '''
-        scene_idx = 2 #np.random.randint(0, len(self.dataset.data))
+        scene_idx = 0 #np.random.randint(0, len(self.dataset.data))
         data_file = self.dataset.data[scene_idx]
         filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
         scene_data = np.load(filename, allow_pickle=True)
@@ -239,7 +239,12 @@ class PandaPB():
         mask = np.intersect1d(x_mask, y_mask)
         mask = np.intersect1d(mask, z_mask)
         pcd = pcd[mask]
-        
+
+        center = np.average(pcd, axis=0)
+        print(center)
+        pcd -= center
+
+        '''
         # Go from world frame to camera frame
         world2cam = np.linalg.inv(self.camera.cam_ext_mat)
         zr = R.from_euler('z', np.pi, degrees=False)
@@ -251,7 +256,9 @@ class PandaPB():
         pcd_cam = np.matmul(world2cam, pcd_cam)
         pcd_cam = np.transpose(pcd_cam, (2, 0, 1))
         pcd_cam = pcd_cam[0, :, :3]
-
+        '''
+        pcd_cam = pcd
+        
         # Forward pass into model
         downsample = np.array(random.sample(range(pcd_cam.shape[0]-1), 20000))
         pcd_cam = pcd_cam[downsample, :]
@@ -305,6 +312,7 @@ class PandaPB():
         print(top_grasp)
         grasp_width = pred_widths[sample_idx]
 
+        '''
         # transform back into the world frame
         cam2world = np.linalg.inv(world2cam)
         point = np.concatenate((point.detach().cpu().numpy(), np.ones((point.shape[0],1))), axis=1)
@@ -313,7 +321,10 @@ class PandaPB():
         point = np.transpose(point, (2, 0, 1))
         point = point[0, :, :3]
         top_grasp = np.matmul(cam2world, top_grasp.detach().cpu().numpy())
-
+        '''
+        point = point.detach().cpu().numpy()
+        top_grasp = top_grasp.detach().cpu().numpy()
+        
         # rotate 90 degrees about Z of gripper
         gr = R.from_euler('z', np.pi/2, degrees=False)
         gripper_fix = np.eye(4)
@@ -477,8 +488,8 @@ class PandaPB():
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--save_path', type=str, default='./checkpoints/march_save2.pth', help='path to load model from')
-    parser.add_argument('--config_path', type=str, default='./eval/', help='path to config yaml file')
+    parser.add_argument('--save_path', type=str, default='./checkpoints/single.pth', help='path to load model from')
+    parser.add_argument('--config_path', type=str, default='./model/', help='path to config yaml file')
     parser.add_argument('--data_path', type=str, default='/home/alinasar/acronym/scene_contacts', help='path to acronym dataset with Contact-GraspNet folder')
     args = parser.parse_args()
     

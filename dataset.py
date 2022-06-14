@@ -8,6 +8,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from scipy.spatial import KDTree, cKDTree
 from scipy.spatial.transform import Rotation as R
+from test_meshcat_pcd import viz_pcd as V
+
 
 def get_dataloader(data_path, size=None, data_config=None):
     dataset = ContactDataset(data_path, data_config, size=size, overfit_test=False)
@@ -29,7 +31,7 @@ def crop_pcd(pointcloud, center, save_name, radius=0.5):
     return cropped_pcd, indices
 
 class ContactDataset(Dataset):
-    def __init__(self, data_path, data_config, size=None, overfit_test=True):
+    def __init__(self, data_path, data_config, size=None, overfit_test=False):
         self.data = []
         self.data_config = data_config
         data_path = os.fsencode(data_path)
@@ -44,7 +46,7 @@ class ContactDataset(Dataset):
             filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
             self.overfit_scene = load(filename)
             self.gt_contact_info = self.get_contact_info([self.overfit_scene])
-            self.pc_cam, self.pc_normals, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True)
+            self.pc_cam, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True)
                         
     def get_contact_info(self, scene):
         contact_pts, grasp_poses, base_dirs, approach_dirs, offsets, idcs = data_utils.load_contact_grasps(scene, self.data_config)
@@ -60,11 +62,17 @@ class ContactDataset(Dataset):
     def __getitem__(self, idx):
         # get positive grasp info
         '''
-        grasp_transforms = scene_data['grasp_transforms']
-        contact_pts = scene_data['scene_cotact_points']
-        contacts1, contacts2 = np.split(contact_pts, 2, axis=1) #split contact points into first and second point
-        contacts1, contacts2 = contacts1.reshape(-1, 3), contacts2.reshape(-1, 3) 
-        offsets = np.linalg.norm(np.subtract(contacts1, contacts2))
+        if self.multiview:
+            if idx%self.max_mv==0:
+        '''
+        try:
+            data_file = self.data[idx]
+            filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
+            scene_data = load(filename, allow_pickle=True)
+            self.gt_contact_info = self.get_contact_info([scene_data])
+        except:
+            idx += 1
+            return self.__getitem__(idx)
         '''
         if not self.overfit_test:
             data_file = self.data[idx]
@@ -73,7 +81,8 @@ class ContactDataset(Dataset):
             self.gt_contact_info = self.get_contact_info([scene_data])
         else:
             scene_data = self.overfit_scene
-            
+        '''
+        
         # render point clouds
         obj_paths = scene_data['obj_paths']
         for i, path in enumerate(obj_paths):
@@ -84,48 +93,26 @@ class ContactDataset(Dataset):
         
         #if not self.overfit_test:
         self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
-        self.pc_cam, self.pc_normals, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True, camera_pose=None) #self.camera_pose
-        print(self.camera_pose)
+        self.pc_cam, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True, camera_pose=None) #self.camera_pose
+        #V(self.pc_cam, 'scene/pc_cam')
+        
+        # transform point cloud to world frame
         pc_hom = np.concatenate((self.pc_cam, np.ones((self.pc_cam.shape[0], 1))), 1).T
-        print(pc_hom.shape)
-        #pc_hom[:, 2] = -pc_hom[:, 2]
         xr = R.from_euler('x', np.pi, degrees=False)
         x_rot = np.eye(4)
         x_rot[:3, :3] = xr.as_matrix()
-        camera = copy.deepcopy(self.camera_pose)
         self.pc = np.dot(x_rot, pc_hom)
-        self.pc = np.dot(camera, self.pc).T
+        self.pc = np.dot(self.camera_pose, self.pc).T
+        #V(self.pc, 'scene/world__pc')
+        
+        mean = np.mean(self.pc[:,:3], axis=0)
+        self.pc = self.pc[:,:3] - mean
+        #V(self.pc, 'scene/norm')
 
-        np.save('world_pc', self.pc)
-        np.save('cam_pc', self.pc_cam)
-        np.save('cam_pose', self.camera_pose)
+        pcd = self.pc
+        #pcd_normals = self.pc_normals[:, :3]
 
-        '''
-        pcd_mean = np.mean(self.pc_cam, axis=0)
-        pcd_cam_cent = self.pc_cam - pcd_mean
-        pcd_cam_cent_rot = np.matmul(self.camera_pose[:-1, :-1], pcd_cam_cent.T).T
-        y_rot_mat = R.from_euler('xyz', [0, np.pi, 0]).as_matrix()
-        z_rot_mat = R.from_euler('xyz', [0, 0, np.pi/2]).as_matrix()
-        pcd_world = pcd_cam_cent_rot + pcd_mean
-        
-        # pcd_world = pcd_cam_cent_rot + self.camera_pose[:-1, -1] + pcd_mean
-        
-        rand_pt = [0, 0, 0]
-        # self.pc, _ = crop_pcd(pcd_world, rand_pt, 'obs_pcd')
-        self.pc, _ = crop_pcd(pcd_cam_cent_rot, rand_pt, 'obs_pcd')
-        # self.pc, _ = crop_pcd(pcd, rand_pt, 'obs_pcd')
-        self.gt_contact_info['contact_pts'], crop_idcs = crop_pcd(self.gt_contact_info['contact_pts'][0], rand_pt, 'gt_pcd')
-        self.gt_contact_info['grasp_poses'] = self.gt_contact_info['grasp_poses'][:, crop_idcs]
-        self.gt_contact_info['base_dirs'] = self.gt_contact_info['base_dirs'][:, crop_idcs]
-        self.gt_contact_info['approach_dirs'] = self.gt_contact_info['approach_dirs'][:, crop_idcs]
-        self.gt_contact_info['offsets'] = self.gt_contact_info['offsets'][:, crop_idcs]
-        self.gt_contact_info['idcs'] = crop_idcs
-        '''
-        pcd = self.pc[:, :3]
-        pcd_normals = self.pc_normals[:, :3]
-        from IPython import embed; embed()
-        
-        return torch.Tensor(pcd).float(), torch.Tensor(pcd_normals).float(), self.camera_pose, self.gt_contact_info
+        return torch.Tensor(pcd).float(), mean, self.camera_pose, self.gt_contact_info
 
     def __len__(self):
         return len(self.data)

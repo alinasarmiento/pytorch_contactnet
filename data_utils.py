@@ -185,6 +185,14 @@ def reject_median_outliers(data, m=0.4, z_only=False):
 
     return data[np.sum(d, axis=1) < m]
 
+def reject_z_outliers(data): #, cam, m=1):
+    '''
+    Reject points that arise from bug in rendering (~5000 points at the camera location)
+    '''
+    d = np.linalg.norm(data[:,:3], axis=1)
+    np.save('d', data[:,:3])
+    return data[d > 1]
+
 def regularize_pc_point_count(pc, npoints, use_farthest_point=False):
     """
       If point cloud pc has less points than npoints, it oversamples.
@@ -246,8 +254,9 @@ def estimate_normals_cam_from_pc(pc_cam, max_radius=0.05, k=12):
     Returns:
         [np.ndarray] -- Nx3 point cloud normals
     """
+    print('this was called')
     tree = cKDTree(pc_cam, leafsize=pc_cam.shape[0]+1)
-    _, ndx = tree.query(pc_cam, k=k, distance_upper_bound=max_radius, n_jobs=-1) # num_points x k
+    _, ndx = tree.query(pc_cam, k=k, distance_upper_bound=max_radius, n_jobs=8) # num_points x k
     
     for c,idcs in enumerate(ndx):
         idcs[idcs==pc_cam.shape[0]] = c
@@ -487,7 +496,7 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
         pose_labels = []
         for pcd, cam_pose, gt_pcd, gt_pose, gt_dir, gt_appr, gt_width in zip(obs_pcds, cam_poses, pos_contact_pts_mesh, grasp_poses, pos_contact_dirs, pos_contact_approaches, pos_finger_diffs):
             # Convert ground truth point cloud to camera frame
-
+            '''
             x_rot_mat = R.from_euler('xyz', [np.pi, 0, 0]).as_matrix()
             gt_pcd = np.concatenate((gt_pcd, np.ones((gt_pcd.shape[0], 1))), 1)
             gt_pcd_cam = np.matmul(gt_pcd, np.linalg.inv(cam_pose).T)[:, :3]
@@ -509,31 +518,33 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
             # Convert ground truth grasp poses to camera frame
             gt_pose = np.matmul(np.linalg.inv(cam_pose), gt_pose)
             gt_pose = np.matmul(x_rot_mat, gt_pose)        
-            
+            '''
             pose_labels.append(gt_pose)
-
             # Find K nearest neighbors to each point from labeled contacts
-            knn_tree = KDTree(pcd)
-            indices = knn_tree.query_ball_point(gt_pcd_cam, radius) # M x k x 1
+            knn_tree = KDTree(gt_pcd)
+            d, indices = knn_tree.query(pcd, distance_upper_bound=radius)
+
+            #indices = knn_tree.query_ball_point(gt_pcd, radius) # M x k x 1
             # Create corresponding lists for baseline, approach, width, and binary success
             dirs = np.zeros_like(pcd)
             approaches = np.zeros_like(pcd)
             widths = np.zeros([N, 1])
             idx_array = []
             pos_labels = np.array([])
+            gt_dir = gt_dir[0]
+            gt_appr = gt_appr[0]
             
-            for i, index_list in enumerate(indices):
-                # the index_list at position (i) is a list of the points in the observed point cloud that correspond to the ith grasp in the grasp list
-                # hopefully, if the params are good, then there won't be any overlap (multiple grasps corresponding to the same observed point)
-                # in the case of overlap, should pick one grasp to label the point with (the closer one? or a random one?)
-                dir_label = gt_dir[i]
-                appr_label = gt_appr[i]
-                width_label = gt_width[0, :][i]
-                for idx in index_list:
-                    idx_array.append([idx, i]) # point index, grasp label index
-                    dirs[idx] = dir_label
-                    approaches[idx] = appr_label
-                    widths[idx] = width_label
+            for pcd_i, label_i in enumerate(indices):
+                if label_i == len(gt_pcd):
+                    continue
+                
+                dir_label = gt_dir[label_i]
+                appr_label = gt_appr[label_i]
+                width_label = gt_width[0, :][label_i]
+                idx_array.append([pcd_i, label_i])
+                dirs[pcd_i] = dir_label
+                approaches[pcd_i] = appr_label
+                widths[pcd_i] = width_label
 
             label_idxs.append(np.array(idx_array))
             success = np.where(widths>0, 1, 0)
@@ -793,15 +804,25 @@ class PointCloudReader:
         depth = self._augment_depth(depth)
         
         pc = self._renderer._to_pointcloud(depth)
+
+        cam_pos = in_camera_pose[:3,3]
+
+        pc = reject_z_outliers(pc)
+
+        '''
+        # transform point cloud to world frame                                                                                                                                                              
+        #pc_hom = np.concatenate((pc, np.ones((pc.shape[0], 1))), 1).T
+        xr = R.from_euler('x', np.pi, degrees=False)
+        x_rot = np.eye(4)
+        x_rot[:3, :3] = xr.as_matrix()
+        pc = np.dot(x_rot, pc.T)
+        pc = np.dot(camera_pose, pc).T
+        '''
         
         pc = regularize_pc_point_count(pc, self._raw_num_points, use_farthest_point=self._use_farthest_point)
         pc = self._augment_pc(pc)
-        
-        pc_normals = estimate_normals_cam_from_pc(pc_cam=pc[:,:3]) if estimate_normals else []
-        #from IPython import embed
-        #embed()
-        
-        return pc, pc_normals, camera_pose, depth
+
+        return pc, camera_pose, depth
 
     def change_object(self, cad_path, cad_scale):
         """

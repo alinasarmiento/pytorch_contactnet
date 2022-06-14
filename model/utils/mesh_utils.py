@@ -150,7 +150,6 @@ class PandaGripper(object):
             # actual depth of the gripper different from convex collision model
             control_points[1:3, 2] = 0.0584
         control_points = np.tile(np.expand_dims(control_points, 0), [batch_size, 1, 1])
-
         return control_points
 
 
