@@ -76,7 +76,7 @@ model:
 gripper_depth: 0.1034
 loss:
   conf_mult: 1
-  add_s_mult: 1000
+  add_s_mult: 10
   appr_vec_mult: 0
   width_mult: 1
 data:

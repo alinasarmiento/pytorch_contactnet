@@ -52,7 +52,7 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
     #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=40)
     writer = SummaryWriter()
     torch.autograd.set_detect_anomaly(True)
-    for epoch in range(args.epoch_marker:epochs):
+    for epoch in range(args.epoch_marker,epochs):
         # Train
         model.train()
         running_loss = 0.0
@@ -109,8 +109,9 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
 
                 #np.save('ground_truth', gt_points[0, :, :])
                 #np.save('world_pc', pcd[:20000, :3].cpu().numpy())
-                V(gt_points[0,:,:].cpu().numpy(), 'scene/ground_truth', clear=True)
-                V(pcd[:20000, :3].cpu().numpy(), 'scene/world_pc')
+                if args.viz:
+                    V(gt_points[0,:,:].cpu().numpy(), 'scene/ground_truth', clear=True)
+                    V(pcd[:20000, :3].cpu().numpy(), 'scene/world_pc')
             
                 labels_dict = {}
                 labels_dict['success_idxs'] = success_idxs
@@ -145,18 +146,26 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
             running_loss += loss
 
             # save the model
-            if save:
-                epoch_pth = args.save_path + 'epoch_' + str(epoch+1) + '_i_' + str(i+1) + '.pth'
-                try:
-                    f = open(epoch_pth, 'x')
-                except:
-                    pass
-                
-                checkpoint = {'state_dict':model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch':i+1}
-                torch.save(checkpoint, epoch_pth)
-            if i%10 == 0:
+            current_pth = args.save_path + 'current.pth'
+            try:
+                f = open(current_pth, 'x')
+            except:
+                pass
+            checkpoint = {'state_dict':model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch':i+1}
+            torch.save(checkpoint, current_pth)
+            if i%1000 == 0:
                 print('[Epoch: %d, Batch: %4d / %4d], Train Loss: %.3f' % (epoch + 1, (i) + 1, len(train_loader), running_loss/10))
                 #print('CONF', loss_list[0].item(), 'ADD-S', loss_list[1].item(), 'WIDTH', loss_list[2].item())
+                if save:
+                    epoch_pth = args.save_path + 'epoch_' + str(epoch+1) + '_i_' + str(i+1) + '.pth'
+                    try:
+                        f = open(epoch_pth, 'x')
+                    except:
+                        pass
+
+                    checkpoint = {'state_dict':model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch':i+1}
+                    torch.save(checkpoint, epoch_pth)
+
                 running_loss = 0.0
 
         # Validation
@@ -185,6 +194,7 @@ if __name__=='__main__':
     #parser.add_argument('--i', type=int, default=0, help='sample num to start on')
     parser.add_argument('--uncoupled', type=bool, default=False, help='whether or not to couple the add-s and success multiheads')
     parser.add_argument('--epoch_marker', type=int, default=0, help='what epoch to start on')
+    parser.add_argument('--viz', type=bool, default=False, help='live visualization in meshcat')
     args = parser.parse_args()
     print(args)
 

@@ -20,7 +20,7 @@ print('FRANKA URDF: ', FRANKA_URDF)
 from pybullet_tools.ikfast.ikfast import get_ik_joints, either_inverse_kinematics, check_ik_solver
 
 from airobot.utils import common
-from ndf_robot.utils import util, path_util
+import simulation.utils as util #, path_util
 
 class FrankaIK:
     def __init__(self, gui=True, base_pos=[0, 0, 1]):

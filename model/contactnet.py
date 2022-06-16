@@ -253,10 +253,10 @@ class ContactNet(nn.Module):
 
         
         pred_pts1 = pred_pts_list[0][:,:,:3]
-        print('pred pts', pred_pts1.shape)
         #pred_pts2 = pred_pts_list[1][:,:,:3]
         np.save('control_pt_list', pred_pts1.detach().cpu().numpy())
-        V(pred_pts1.detach().cpu().numpy(), 'pred/', grasps=True)
+        if args.viz:
+            V(pred_pts1.detach().cpu().numpy(), 'pred/', grasps=True)
         label_pts1 = label_pts_list[0][0][:,:,:3]
         np.save('label_pt_list', label_pts1.detach().cpu().numpy())
         '''

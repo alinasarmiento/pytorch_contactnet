@@ -21,6 +21,7 @@ from train import initialize_loaders, initialize_net
 from scipy.spatial.transform import Rotation as R
 import argparse
 from torch_geometric.nn import fps
+from test_meshcat_pcd import viz_pcd as V
 
 sys.path.append('../')
 sys.path.append('../airobot/src/')
@@ -28,6 +29,7 @@ from airobot import Robot
 #from airobot.franka_pybullet import FrankaPybullet
 from airobot.utils.pb_util import BulletClient
 from airobot.sensor.camera.rgbdcam_pybullet import RGBDCameraPybullet
+import airobot.utils.arm_util as arm_util
 sys.path.remove('../airobot/src/')
 sys.path[0] = sys.path[0].rstrip(sys.path[0][-4:])
 from panda_pb_cfg import get_cfg_defaults
@@ -61,6 +63,25 @@ class PandaPB():
         self.config = config
         self.pb_ids = None
         self.robot = None
+
+        self.panda_ignore_pairs_initial = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (6, 8),
+            (7, 8), (7, 9), (7, 10), (7, 11),
+            (8, 9), (8, 10), (8, 11),
+            (9, 10), (9, 11),
+            (10, 11)
+        ]
+        self.panda_ignore_pairs = []
+        for (i, j) in self.panda_ignore_pairs_initial:
+            self.panda_ignore_pairs.append((i, j))
+            self.panda_ignore_pairs.append((j, i))
         
     def _camera_cfgs(self):
         """                                                                                                                                                                                               
@@ -83,7 +104,7 @@ class PandaPB():
         '''
         Returns a random scene from the ShapeNet generated scenes folder
         '''
-        scene_idx = 0 #np.random.randint(0, len(self.dataset.data))
+        scene_idx = 16 #np.random.randint(0, len(self.dataset.data))
         data_file = self.dataset.data[scene_idx]
         filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
         scene_data = np.load(filename, allow_pickle=True)
@@ -114,9 +135,11 @@ class PandaPB():
                                    'seed': None})
         
         self.robot.pb_client.set_step_sim(True)
+
         # Get a random cluttered scene from the dataset
         obj_scales, obj_transforms, obj_paths = self.get_rand_scene()
 
+        # Pybullet set up
         p.setGravity(0, 0, -9.8)
 
         cam_cfg = {}
@@ -128,12 +151,10 @@ class PandaPB():
 
         self.camera = RGBDCameraPybullet(cfgs=self._camera_cfgs(), pb_client=self.robot.pb_client)
         self.camera.setup_camera(
-            focus_pt=[0, 0, 0], #cam_cfg['focus_pt'])
-            dist=1.5, yaw=0, pitch=-40)#cam_cfg['dist'],
-            #yaw=cam_cfg['yaw'],
-            #pitch=cam_cfg['pitch'],
-            #roll=cam_cfg['roll'])
+            focus_pt=[0, 0, 0],
+            dist=1.5, yaw=0, pitch=-40)
 
+        # Instantiate the objects in the scene
         collision_args = {}
         visual_args = {}
         self.pb_ids = []
@@ -186,42 +207,11 @@ class PandaPB():
                                            baseOrientation=q)
                                            #**kwargs)
             self.pb_ids.append(body_id)
-            #t[2] -= 0.3 #bring the objects down onto the floor for airobot rendering
             self.robot.pb_client.load_geom(shape_type='mesh', visualfile=tmp_path, collifile=tmp_path,
                                      mass=1.0, mesh_scale=scale, rgba=[0.5,0,0,1], specular=[0,0.5,0.4],
                                      base_pos=t, base_ori=q)
             
-        # Add table
-        '''
-        collision_args = {}
-        visual_args = {}
-        t = np.array([0,0,0.295])
-        q = np.array([0,0,0,1])
-        collision_args['collisionFramePosition'] = None
-        collision_args['collisionFrameOrientation'] = None
-        visual_args['visualFramePosition'] = None
-        visual_args['visualFrameOrientation'] = None
-
-        collision_args['shapeType'] = p.GEOM_BOX
-        collision_args['halfExtents'] = np.array([1,1,0.005])
-        visual_args['shapeType'] = p.GEOM_BOX
-        visual_args['halfExtents'] = np.array([1,1,0.005])
-        visual_args['rgbaColor'] = [0, 0, 0.5, 1]
-        visual_args['specularColor'] = [0, 0.5, 0.4]
-        vs_id = p.createVisualShape(**visual_args)
-        cs_id = p.createCollisionShape(**collision_args)
-        body_id = p.createMultiBody(baseMass=1.0,
-                                       baseInertialFramePosition=None, #t,                                                                                                            
-                                       baseInertialFrameOrientation=None, #q,                                                                                                         
-                                       baseCollisionShapeIndex=cs_id,
-                                       baseVisualShapeIndex=vs_id,
-                                       basePosition=t,
-                                       baseOrientation=q)
-                                       #**kwargs)                                                                                                                                     
-        self.pb_ids.append(body_id)
-        '''    
-        # Render pointcloud
-        
+        # Render pointcloud        
         rgb, depth, seg = self.camera.get_images(
                     get_rgb=True,
                     get_depth=True,
@@ -242,7 +232,7 @@ class PandaPB():
 
         center = np.average(pcd, axis=0)
         print(center)
-        pcd -= center
+        #pcd -= center
 
         '''
         # Go from world frame to camera frame
@@ -263,7 +253,7 @@ class PandaPB():
         downsample = np.array(random.sample(range(pcd_cam.shape[0]-1), 20000))
         pcd_cam = pcd_cam[downsample, :]
         pcd = pcd[downsample, :]
-        np.save('pybullet_pcd.npy', pcd_cam)        
+        V(pcd_cam, 'pb_raw', clear=True)
         print('here')
         '''
         import matplotlib.pyplot as plt
@@ -296,14 +286,13 @@ class PandaPB():
         
         # Return a sample of predicted grasps
         pcd = pcd[idx.detach().cpu().numpy()]
-        obj_mask = np.where((pcd[:, 2] > 0.04))[0]
+        obj_mask = np.where(pcd[:, 2] > 0.04)[0]
         print('object mask is', obj_mask.shape)
         obj_success = pred_successes[obj_mask]
         success, sample_idx = torch.topk(obj_success, 10)
+        V(points.detach().cpu().numpy()[obj_mask], 'masked')
+        sample_idx = obj_mask[sample_idx.detach().cpu().numpy()]
 
-        #sample_idx = torch.where(pred_successes>0.04)[0].detach().cpu().numpy()
-        ##sample_idx=random.sample(range(len(obj_mask)-1), 10)
-        ##sample_idx = obj_mask[sample_idx]
         #sample_idx = np.intersect1d(obj_mask, sample_idx)
         from IPython import embed; embed()
         point = points[sample_idx[:10]]
@@ -325,14 +314,6 @@ class PandaPB():
         point = point.detach().cpu().numpy()
         top_grasp = top_grasp.detach().cpu().numpy()
         
-        # rotate 90 degrees about Z of gripper
-        gr = R.from_euler('z', np.pi/2, degrees=False)
-        gripper_fix = np.eye(4)
-        gripper_fix[:3, :3] = gr.as_matrix()
-        gripper_fix = np.matmul(gripper_fix, np.linalg.inv(top_grasp))
-        gripper_fix = np.matmul(top_grasp, gripper_fix)
-        top_grasp = np.matmul(gripper_fix, top_grasp)
-        
         '''
         cam2world = np.array([self.camera.cam_ext_mat])
         top_grasp = np.matmul(cam2world, top_grasp.detach().cpu())[0]
@@ -347,18 +328,18 @@ class PandaPB():
         for i in range(p.getNumJoints(self.pb_robot, physicsClientId=pb_client)):
             for j in range(p.getNumJoints(self.pb_robot, physicsClientId=pb_client)):
                 # don't check link colliding with itself, and ignore specified links
-                if i != j and (i, j) not in ignore_link_pairs:
+                if i != j and (i, j) not in self.panda_ignore_pairs:
                     check_self_coll_pairs.append((i, j))
-        for link1, link2 in self.check_self_coll_pairs:
-             if pairwise_link_collision(self.robot, link1, self.robot, link2):
+        for link1, link2 in check_self_coll_pairs:
+             if pairwise_link_collision(self.pb_robot, link1, self.pb_robot, link2):
                  return True, 'self'
 
         # check collisions between robot and pybullet scene bodies
         for body in self.pb_ids:
-            collision = body_collision(self.pb_robot, body)
+            collision = pairwise_collision(self.pb_robot, body)
             if collision:
                 return True, body
-        return False
+        return False, None
 
     def solve_ik(self, pose):
         tool_link = link_from_name(self.pb_robot, 'panda_hand')
@@ -369,7 +350,7 @@ class PandaPB():
         for conf in confs:
             print(conf)
             set_joint_positions(self.pb_robot, ik_joints, conf)
-            collision_info = self.check_collision(self.pb_robot)
+            collision_info = self.check_collision()
             if not collision_info[0]:
                 return conf 
             else:
@@ -394,6 +375,14 @@ class PandaPB():
 
         for predicted_grasp, point, width in zip(predicted_grasps, points, predicted_widths):
 
+            # rotate grasp by pi/2 about the z axis (urdf fix)
+            z_r = R.from_euler('z', np.pi/2, degrees=False)
+            z_rot = np.eye(4)
+            z_rot[:3,:3] = z_r.as_matrix()
+            z_rot = np.matmul(z_rot, np.linalg.inv(predicted_grasp))
+            z_rot = np.matmul(predicted_grasp, z_rot)
+            robot_grasp = np.matmul(z_rot, predicted_grasp)
+            
             rot = R.from_matrix(predicted_grasp[:3, :3])
 
             quat = rot.as_quat()
@@ -467,21 +456,38 @@ class PandaPB():
                                            baseOrientation=q)
                                            #**kwargs)
 
+            #####################
+            rot = R.from_matrix(robot_grasp[:3, :3])
 
-        from IPython import embed; embed()
-        #####################
-        
-        # ik stuff
-        pose = (tuple(pos), tuple(quat))
-        lift_pose = (tuple(lift_pos), tuple(quat))
-        sol_jnts = self.solve_ik(pose)
-        lift_jnts = self.solve_ik(lift_pose)
+            quat = rot.as_quat()
+            pos = robot_grasp[:3, -1]
 
-        success = False # this needs to be set
-        self.robot.arm.eetool.open()
-        self.robot.arm.set_jpos(sol_jnts, wait=False, ignore_physics=True)
-        self.robot.arm.eetool.set_jpos(predicted_width-0.01, wait=True, ignore_physics=True)
-        self.robot.arm.set_jpos(lift_jnts, wait=False)
+            
+            # ik stuff
+            self.robot.arm.go_home(ignore_physics=True)
+            print('gripper!', self.robot.arm.eetool._is_activated)
+            self.robot.arm.reset()
+
+            open_attempt = self.robot.arm.eetool.open(ignore_physics=False)
+            print(open_attempt)
+            print(width)
+            from IPython import embed; embed()
+
+            
+            pose = (tuple(pos), tuple(quat))
+            lift_pose = (tuple(lift_pos), tuple(quat))
+            sol_jnts = self.solve_ik(pose)
+            lift_jnts = self.solve_ik(lift_pose)
+            if sol_jnts is None:
+                continue
+
+            success = False # this needs to be set
+            
+            self.robot.arm.set_jpos(sol_jnts, wait=True, ignore_physics=False)
+
+            self.robot.arm.eetool.close()
+            #self.robot.arm.eetool.set_jpos(0.1, wait=True, ignore_physics=False)
+            self.robot.arm.set_jpos(lift_jnts, wait=True)
         # wait
         # check contact between fingers and object (?)
         return success
