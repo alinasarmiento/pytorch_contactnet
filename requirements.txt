@@ -1,3 +1,4 @@
+pybullet
 keras
 pyyaml
 scipy
@@ -8,3 +9,4 @@ tensorboard
 opencv-python
 colorlog
 gym
+lcm

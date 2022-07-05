@@ -70,49 +70,54 @@ class ContactDataset(Dataset):
             filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
             scene_data = load(filename, allow_pickle=True)
             self.gt_contact_info = self.get_contact_info([scene_data])
+            '''
+            if not self.overfit_test:
+                data_file = self.data[idx]
+                filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
+                scene_data = load(filename, allow_pickle=True)
+                self.gt_contact_info = self.get_contact_info([scene_data])
+            else:
+                scene_data = self.overfit_scene
+            '''
+
+            # render point clouds
+            obj_paths = scene_data['obj_paths']
+            for i, path in enumerate(obj_paths):
+                fixed_path = '../acronym/models/' + path.split('/')[-1]
+                obj_paths[i] = fixed_path
+            obj_scales = scene_data['obj_scales']
+            obj_transforms = scene_data['obj_transforms']
+
+            #if not self.overfit_test:
+            self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
+            self.pc_cam, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True, camera_pose=None) #self.camera_pose
+            #V(self.pc_cam, 'scene/pc_cam')
+
+            # transform point cloud to world frame
+            pc_hom = np.concatenate((self.pc_cam, np.ones((self.pc_cam.shape[0], 1))), 1).T
+            xr = R.from_euler('x', np.pi, degrees=False)
+            x_rot = np.eye(4)
+            x_rot[:3, :3] = xr.as_matrix()
+            self.pc = np.dot(x_rot, pc_hom)
+            self.pc = np.dot(self.camera_pose, self.pc).T
+            #V(self.pc, 'scene/world__pc')
+
+            mean = np.mean(self.pc[:,:3], axis=0)
+            self.pc = self.pc[:,:3] - mean
+            #V(self.pc, 'scene/norm')
+
+            pcd = self.pc
+            #pcd_normals = self.pc_normals[:, :3]
+
+            if len(self.pc) == 0:
+                raise Exception
+            
+            return torch.Tensor(pcd).float(), mean, self.camera_pose, self.gt_contact_info
+
         except:
             idx += 1
             return self.__getitem__(idx)
-        '''
-        if not self.overfit_test:
-            data_file = self.data[idx]
-            filename = '../acronym/scene_contacts/' + os.fsdecode(data_file)
-            scene_data = load(filename, allow_pickle=True)
-            self.gt_contact_info = self.get_contact_info([scene_data])
-        else:
-            scene_data = self.overfit_scene
-        '''
-        
-        # render point clouds
-        obj_paths = scene_data['obj_paths']
-        for i, path in enumerate(obj_paths):
-            fixed_path = '../acronym/models/' + path.split('/')[-1]
-            obj_paths[i] = fixed_path
-        obj_scales = scene_data['obj_scales']
-        obj_transforms = scene_data['obj_transforms']
-        
-        #if not self.overfit_test:
-        self.pcreader._renderer.change_scene(obj_paths, obj_scales, obj_transforms)
-        self.pc_cam, self.camera_pose, self.depth = self.pcreader.render_random_scene(estimate_normals=True, camera_pose=None) #self.camera_pose
-        #V(self.pc_cam, 'scene/pc_cam')
-        
-        # transform point cloud to world frame
-        pc_hom = np.concatenate((self.pc_cam, np.ones((self.pc_cam.shape[0], 1))), 1).T
-        xr = R.from_euler('x', np.pi, degrees=False)
-        x_rot = np.eye(4)
-        x_rot[:3, :3] = xr.as_matrix()
-        self.pc = np.dot(x_rot, pc_hom)
-        self.pc = np.dot(self.camera_pose, self.pc).T
-        #V(self.pc, 'scene/world__pc')
-        
-        mean = np.mean(self.pc[:,:3], axis=0)
-        self.pc = self.pc[:,:3] - mean
-        #V(self.pc, 'scene/norm')
 
-        pcd = self.pc
-        #pcd_normals = self.pc_normals[:, :3]
-
-        return torch.Tensor(pcd).float(), mean, self.camera_pose, self.gt_contact_info
 
     def __len__(self):
         return len(self.data)

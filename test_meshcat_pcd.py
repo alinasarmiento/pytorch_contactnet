@@ -66,7 +66,17 @@ def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
             mc_vis[name+name_i].set_object(g.Line(g.PointsGeometry(gripper)))
             #mc_vis[name_i+'wrist'].set_object(g.Line(g.PointsGeometry(wrist)))
 
-def viz_pcd(np_pc, name, grasps=False, clear=False):
+def mesh_gripper(mc_vis, pose, name=None):
+    gripper_path = os.path.join(os.getenv('HOME'), 'pytorch_contactnet/gripper_models/panda_gripper/panda_gripper.obj')
+    gripper = meshcat.geometry.ObjMeshGeometry.from_file(gripper_path)
+    if name is None:
+        name = 'gripper'
+    mc_vis['scene/'+name].set_object(gripper)
+    print('pose: ', pose)
+    #mc_vis['scene/'+name].set_transform(pose)
+    mc_vis['scene/'+name].set_transform(pose.astype(np.float64))
+            
+def viz_pcd(np_pc, name, grasps=False, gripper=False, clear=False):
     vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
     #print('MeshCat URL: %s' % vis.url())
     if clear:
@@ -74,6 +84,8 @@ def viz_pcd(np_pc, name, grasps=False, clear=False):
         vis.delete()
     if grasps:
         sample_grasp_show(vis, np_pc, name=name, freq=1)
+    elif gripper:
+        mesh_gripper(vis, np_pc, name=name)
     else:
         meshcat_pcd_show(vis, np_pc, name=name)
 

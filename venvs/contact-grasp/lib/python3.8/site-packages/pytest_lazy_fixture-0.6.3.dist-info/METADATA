@@ -1,0 +1,110 @@
+Metadata-Version: 2.1
+Name: pytest-lazy-fixture
+Version: 0.6.3
+Summary: It helps to use fixtures in pytest.mark.parametrize
+Home-page: https://github.com/tvorog/pytest-lazy-fixture
+Author: Marsel Zaripov
+Author-email: marszaripov@gmail.com
+Maintainer: Marsel Zaripov
+Maintainer-email: marszaripov@gmail.com
+License: MIT
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Framework :: Pytest
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Software Development :: Testing
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 2
+Classifier: Programming Language :: Python :: 2.7
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Programming Language :: Python :: Implementation :: PyPy
+Classifier: Operating System :: OS Independent
+Classifier: License :: OSI Approved :: MIT License
+Requires-Dist: pytest (>=3.2.5)
+
+pytest-lazy-fixture |travis-ci| |appveyor| |pypi|
+=================================================
+
+Use your fixtures in ``@pytest.mark.parametrize``.
+
+Installation
+------------
+
+.. code-block:: shell
+
+    pip install pytest-lazy-fixture
+
+Usage
+-----
+
+.. code-block:: python
+
+    import pytest
+
+    @pytest.fixture(params=[1, 2])
+    def one(request):
+        return request.param
+
+    @pytest.mark.parametrize('arg1,arg2', [
+        ('val1', pytest.lazy_fixture('one')),
+    ])
+    def test_func(arg1, arg2):
+        assert arg2 in [1, 2]
+
+
+Also you can use it as a parameter in ``@pytest.fixture``:
+
+.. code-block:: python
+
+    import pytest
+
+    @pytest.fixture(params=[
+        pytest.lazy_fixture('one'),
+        pytest.lazy_fixture('two')
+    ])
+    def some(request):
+        return request.param
+
+    @pytest.fixture
+    def one():
+        return 1
+
+    @pytest.fixture
+    def two():
+        return 2
+
+    def test_func(some):
+        assert some in [1, 2]
+
+Please see `tests <https://github.com/TvoroG/pytest-lazy-fixture/blob/master/tests/test_lazyfixture.py>`_ for more examples.
+
+Contributing
+------------
+
+Contributions are very welcome. Tests can be run with ``tox``.
+
+License
+-------
+
+Distributed under the terms of the ``MIT`` license,
+``pytest-lazy-fixture`` is free and open source software
+
+Issues
+------
+
+If you encounter any problems, please ``file an issue`` along with a
+detailed description.
+
+.. |travis-ci| image:: https://travis-ci.org/TvoroG/pytest-lazy-fixture.svg?branch=master
+    :target: https://travis-ci.org/TvoroG/pytest-lazy-fixture
+.. |appveyor| image:: https://ci.appveyor.com/api/projects/status/github/TvoroG/pytest-fixture-mark?branch=master&svg=true
+    :target: https://ci.appveyor.com/project/TvoroG/pytest-fixture-mark
+.. |pypi| image:: https://badge.fury.io/py/pytest-lazy-fixture.svg
+    :target: https://pypi.python.org/pypi/pytest-lazy-fixture/
+
+

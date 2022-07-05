@@ -57,7 +57,6 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
         model.train()
         running_loss = 0.0
         for i, data in enumerate(train_loader):
-
             total_norm = 0
             for p in model.parameters():
                 if p.grad is not None:
@@ -78,9 +77,6 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
             batch_list = batch_list.view(-1).long().to(model.device)
 
             pcd = scene_pcds.view(-1, data_shape[2]).to(model.device)
-            # normalize label points based on mean of pointcloud
-
-            pcd = pcd.view(pcd.shape).to(model.device)
             expanded_pcd = copy.deepcopy(pcd.detach().cpu())
 
             with torch.no_grad():
@@ -107,8 +103,6 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
                                                                                         grasp_poses,
                                                                                         config['data'])
 
-                #np.save('ground_truth', gt_points[0, :, :])
-                #np.save('world_pc', pcd[:20000, :3].cpu().numpy())
                 if args.viz:
                     V(gt_points[0,:,:].cpu().numpy(), 'scene/ground_truth', clear=True)
                     V(pcd[:20000, :3].cpu().numpy(), 'scene/world_pc')
@@ -129,10 +123,8 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
             if flag: continue
 
             optimizer.zero_grad()
-            #np.save('visualization/first_pcd_many', scene_pcds[0][:, :3].detach().cpu())
             points, pred_grasps, pred_successes, pred_widths = model(pcd[:, 3:], pos=pcd[:, :3], batch=batch_list.to(model.device), idx=idx.to(model.device), k=None)
 
-            #np.save('visualization/success_tensor', pred_successes.detach().cpu()[1])
             loss_list = model.loss(pred_grasps, pred_successes, pred_widths, labels_dict, args)
             loss = loss_list[-1]
             writer.add_scalar('Loss/total', loss, i)
@@ -141,9 +133,9 @@ def train(model, optimizer, config, train_loader, val_loader=None, epochs=1, sav
             writer.add_scalar('Loss/add-s', loss_list[1], i)
             writer.add_scalar('Loss/appr', loss_list[3], i)
 
-            loss.backward() #retain_graph=True)
+            loss.backward()
             optimizer.step()
-            running_loss += loss
+            #running_loss += loss
 
             # save the model
             current_pth = args.save_path + 'current.pth'

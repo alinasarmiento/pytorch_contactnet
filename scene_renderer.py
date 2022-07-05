@@ -14,7 +14,8 @@ import pyrender
 import trimesh
 import trimesh.transformations as tra
 
-sys.path.append('model/utils/')
+model_utils_path = os.path.join(os.getenv('HOME'), 'graspnet/graspnet/pytorch_contactnet/model/utils/')
+sys.path.append(model_utils_path)
 from mesh_utils import Object
 
 class SceneRenderer:
