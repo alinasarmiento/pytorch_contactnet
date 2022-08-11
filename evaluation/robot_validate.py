@@ -43,10 +43,9 @@ class PandaReal():
 
         rospy.init_node('Panda')
         self.panda = ArmInterface()
-        self.panda.set_joint_position_speed(0.9)
+        self.panda.set_joint_position_speed(2)
         self.joint_names = self.panda._joint_names
         print('joint names: ', self.joint_names)
-        
         self.ik_helper = FrankaIK(gui=True, base_pos=[0, 0, 0])
         self.model = model
         self.config = config
@@ -68,7 +67,7 @@ class PandaReal():
         rs_cfg = get_default_multi_realsense_cfg()
         serials = rs_cfg.SERIAL_NUMBERS
 
-        serials = [serials[3]] # if multiple cameras are publishing, can pick just one view to use
+        serials = [serials[0]] # if multiple cameras are publishing, can pick just one view to use
 
         rgb_topic_name_suffix = rs_cfg.RGB_LCM_TOPIC_NAME_SUFFIX
         depth_topic_name_suffix = rs_cfg.DEPTH_LCM_TOPIC_NAME_SUFFIX
@@ -95,7 +94,6 @@ class PandaReal():
         lc_thread = threading.Thread(target=self.lc_th, args=(lc,))
         lc_thread.daemon = True
         lc_thread.start()
-
         return lc_thread
 
     def get_images(self):
@@ -103,13 +101,17 @@ class PandaReal():
         render rgb and depth from cameras.
         important: must call self.start_rs_sub() first
         '''
+        self.reset_joints = list(self.panda.joint_angles().values())
+        print('getting images')
         rgb = []
         depth = []
         cam_poses = []
         cam_ints = []
         for (name, img_sub, info_sub) in self.img_subscribers:
             rgb_image, depth_image = img_sub.get_rgb_and_depth(block=True)
+            print('rgb and depth got')
             cam_int = info_sub.get_cam_intrinsics(block=True)
+            print('camera intrinsics got')
             #cam_pose = info_sub.get_cam_pose()
             depth_colormap = cv.applyColorMap(cv.convertScaleAbs(depth_image, alpha=0.03), cv.COLORMAP_JET)
             rgb.append(rgb_image)
@@ -124,6 +126,7 @@ class PandaReal():
         '''
         rgb, depth, cam_poses = self.get_images()
         camera = cam_poses[0]
+        
         
         # depth to point cloud
         cam_pcd = self.renderer._to_pointcloud(depth[0])
@@ -143,10 +146,15 @@ class PandaReal():
         return pcd
 
     def get_pcd_ar(self):
+
+        # self.panda.move_to_neutral()
+        # time.sleep(5)
         rgb_list, depth_list, cam_pose_list, cam_int_list = self.get_images()
 
         pcd_pts = []
         for idx, cam in enumerate(self.cams.cams):
+            print('getting pcd, camera', cam)
+            print(cam_int_list[idx])
             #rgb, depth = img_subscribers[idx][1].get_rgb_and_depth(block=True)
             rgb, depth = rgb_list[idx], depth_list[idx]
             cam_intrinsics = cam_int_list[idx]
@@ -168,12 +176,18 @@ class PandaReal():
             pcd_pts.append(pcd_world)
 
         pcd_full = np.concatenate(pcd_pts, axis=0)
+        x_mask = pcd_full[:,0] > 0.2
+        pcd_full = pcd_full[np.nonzero(x_mask)[0], :]
+        print('got pcd')
+        # from IPython import embed; embed()
+        
         return pcd_full
 
     def infer(self, pcd, threshold=0.6):
         '''
         Forward pass rendered point cloud into the model
         '''
+        print('starting inference')
         self.model.eval()
         
         downsample = np.array(random.sample(range(pcd.shape[0]-1), 20000))
@@ -222,7 +236,7 @@ class PandaReal():
         pre_quat = pre_rot.as_quat()
 
         lift_pose = copy.deepcopy(grasp)
-        lift_pose[2, 3] += 0.3
+        lift_pose[2, 3] += 0.2
         lift_pos = lift_pose[:3, 3]
 
         rot = R.from_matrix(grasp[:3, :3])
@@ -242,16 +256,18 @@ class PandaReal():
         pre_plan = self.ik_helper.plan_joint_motion(current_joints, pre_jnts)
         sol_plan = self.ik_helper.plan_joint_motion(pre_jnts, sol_jnts)
         lift_plan = self.ik_helper.plan_joint_motion(sol_jnts, lift_jnts)
+        reset_plan = self.ik_helper.plan_joint_motion(lift_jnts, self.reset_joints)
 
         if pre_plan is not None and sol_plan is not None:
             pre_plan = np.concatenate((pre_plan, sol_plan), axis=0)
         else:
             pre_plan = None
-        post_plan = lift_plan
+        post_plan = np.array(lift_plan)
+        reset_plan = np.array(reset_plan)
 
         #return plan
         if pre_plan is not None and post_plan is not None:
-            return (pre_plan, post_plan)
+            return (pre_plan, post_plan, reset_plan)
         else:
             return None
 
@@ -261,11 +277,16 @@ class PandaReal():
 
     def execute(self, plan):
         # plan is a tuple!
+        self.panda.hand.open()
         s0 = self.panda.execute_position_path(self.plan2dict(plan[0]))
+        # from IPython import embed; embed()
         self.panda.hand.close()
         s1 = self.panda.execute_position_path(self.plan2dict(plan[1]))
         time.sleep(5)
-        # self.panda.move_to_neutral()
+        val = input('press enter to reset')
+        self.panda.hand.open()
+        s2 = self.panda.execute_position_path(self.plan2dict(plan[2]))
+        #self.panda.move_to_neutral()
         print('execute attempt:', s0, s1)
         return (s0, s1)
 
@@ -284,10 +305,13 @@ if __name__=='__main__':
 
     # Get pcd, pass into model
     pcd = panda_robot.get_pcd_ar()
-    pred_grasps, pred_success = panda_robot.infer(pcd, threshold=0.06)
+    pred_grasps, pred_success = panda_robot.infer(pcd, threshold=0.05)
     plan = None
     V(pcd, 'pcd', clear=True)
     for i, grasp in enumerate(pred_grasps):
+        g_target = np.eye(4)
+        g_target[2, 3] = 0.05
+        grasp = np.matmul(grasp, g_target)
         #V(grasp, f'gripper_{i}', gripper=True)
         V(grasp, f'gripper', gripper=True)
         try_execute = input("enter y to plan, else skip: ")
