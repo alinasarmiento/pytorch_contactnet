@@ -23,7 +23,7 @@ from realsense_lcm.multi_realsense_publisher_visualizer import subscriber_visual
 
 cn_path = os.path.join(os.getenv('HOME'), 'graspnet/graspnet/pytorch_contactnet/')
 sys.path.append(cn_path)
-ik_path = os.path.join(os.getenv('HOME'), 'pybullet-planning/')
+ik_path = os.path.join(os.getenv('HOME'), 'graspnet/graspnet/pybullet-planning/')
 sys.path.append(ik_path)
 
 from model.contactnet import ContactNet
@@ -43,10 +43,10 @@ class PandaReal():
 
         rospy.init_node('Panda')
         self.panda = ArmInterface()
-        self.panda.set_joint_position_speed(1.1)
+        self.panda.set_joint_position_speed(3)
+        self.panda.hand.open()
         self.joint_names = self.panda._joint_names
         print('joint names: ', self.joint_names)
-        v = input ('press enter to continue ')
         self.ik_helper = FrankaIK(gui=True, base_pos=[0, 0, 0])
         self.model = model
         self.config = config
@@ -102,6 +102,9 @@ class PandaReal():
         render rgb and depth from cameras.
         important: must call self.start_rs_sub() first
         '''
+        self.panda.hand.open()
+        time.sleep(1)
+        self.reset_joints = list(self.panda.joint_angles().values())
         print('getting images')
         rgb = []
         depth = []
@@ -126,7 +129,6 @@ class PandaReal():
         '''
         rgb, depth, cam_poses = self.get_images()
         camera = cam_poses[0]
-        
         
         # depth to point cloud
         cam_pcd = self.renderer._to_pointcloud(depth[0])
@@ -218,16 +220,18 @@ class PandaReal():
         output:
             joint trajectory for entire motion plan (including pre-grasp pose)
         '''
+
         # rotate grasp by pi/2 about the z axis (urdf fix)
         z_r = R.from_euler('z', np.pi/2, degrees=False)
         z_rot = np.eye(4)
         z_rot[:3,:3] = z_r.as_matrix()
+        z_rot[2,3] += 0.08
         z_rot = np.matmul(z_rot, np.linalg.inv(grasp))
         z_rot = np.matmul(grasp, z_rot)
         grasp = np.matmul(z_rot, grasp)
 
         offset = np.eye(4)
-        #offset[2, 3] = -0.1
+        offset[2, 3] = -0.1
         offset = np.matmul(offset, np.linalg.inv(grasp))
         offset = np.matmul(grasp, offset)
         pre_grasp = np.matmul(offset, grasp)
@@ -236,7 +240,7 @@ class PandaReal():
         pre_quat = pre_rot.as_quat()
 
         lift_pose = copy.deepcopy(grasp)
-        lift_pose[2, 3] += 0.3
+        lift_pose[2, 3] += 0.2
         lift_pos = lift_pose[:3, 3]
 
         rot = R.from_matrix(grasp[:3, :3])
@@ -256,16 +260,18 @@ class PandaReal():
         pre_plan = self.ik_helper.plan_joint_motion(current_joints, pre_jnts)
         sol_plan = self.ik_helper.plan_joint_motion(pre_jnts, sol_jnts)
         lift_plan = self.ik_helper.plan_joint_motion(sol_jnts, lift_jnts)
+        reset_plan = self.ik_helper.plan_joint_motion(lift_jnts, self.reset_joints)
 
         if pre_plan is not None and sol_plan is not None:
             pre_plan = np.concatenate((pre_plan, sol_plan), axis=0)
         else:
             pre_plan = None
-        post_plan = lift_plan
+        post_plan = np.array(lift_plan)
+        reset_plan = np.array(reset_plan)
 
         #return plan
         if pre_plan is not None and post_plan is not None:
-            return (pre_plan, post_plan)
+            return (pre_plan, post_plan, reset_plan)
         else:
             return None
 
@@ -275,13 +281,22 @@ class PandaReal():
 
     def execute(self, plan):
         # plan is a tuple!
+
+        print('debugging')
+        print(plan[0][0])
+        print(self.panda.joint_angles())
+        from IPython import embed; embed()
         
+        self.panda.hand.open()
         s0 = self.panda.execute_position_path(self.plan2dict(plan[0]))
         # from IPython import embed; embed()
         self.panda.hand.close()
         s1 = self.panda.execute_position_path(self.plan2dict(plan[1]))
         time.sleep(5)
-        # self.panda.move_to_neutral()
+        val = input('press enter to reset')
+        self.panda.hand.open()
+        s2 = self.panda.execute_position_path(self.plan2dict(plan[2]))
+        #self.panda.move_to_neutral()
         print('execute attempt:', s0, s1)
         return (s0, s1)
 
@@ -297,13 +312,15 @@ if __name__=='__main__':
     contactnet, optim, config = initialize_net(args.config_path, load_model=True, save_path=args.load_path)
     panda_robot = PandaReal(contactnet, config, args.viz)
     #panda_moveit = FrankaMoveIt(panda_robot.panda)
-
     # Get pcd, pass into model
     pcd = panda_robot.get_pcd_ar()
-    pred_grasps, pred_success = panda_robot.infer(pcd, threshold=0.06)
+    pred_grasps, pred_success = panda_robot.infer(pcd, threshold=0.05)
     plan = None
     V(pcd, 'pcd', clear=True)
     for i, grasp in enumerate(pred_grasps):
+        g_target = np.eye(4)
+        g_target[2, 3] = 0.05
+        grasp = np.matmul(grasp, g_target)
         #V(grasp, f'gripper_{i}', gripper=True)
         V(grasp, f'gripper', gripper=True)
         try_execute = input("enter y to plan, else skip: ")

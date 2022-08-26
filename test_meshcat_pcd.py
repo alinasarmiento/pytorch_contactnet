@@ -67,7 +67,7 @@ def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
             #mc_vis[name_i+'wrist'].set_object(g.Line(g.PointsGeometry(wrist)))
 
 def mesh_gripper(mc_vis, pose, name=None):
-    gripper_path = os.path.join(os.getenv('HOME'), 'pytorch_contactnet/gripper_models/panda_gripper/panda_gripper.obj')
+    gripper_path = os.path.join(os.getenv('HOME'), 'graspnet/graspnet/pytorch_contactnet/gripper_models/panda_gripper/panda_gripper.obj')
     gripper = meshcat.geometry.ObjMeshGeometry.from_file(gripper_path)
     if name is None:
         name = 'gripper'
