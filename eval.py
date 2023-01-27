@@ -7,9 +7,9 @@ import numpy as np
 import copy
 import random
 import meshcat
-cn_path = os.path.join(os.getenv('HOME'), 'cgn')
+cn_path = os.path.join(os.getenv('HOME'), 'pytorch_contactnet')
 sys.path.append(cn_path)
-from IPython import embed
+
 from model.contactnet import ContactNet
 import model.utils.config_utils as config_utils
 import model.utils.mesh_utils as mesh_utils
@@ -21,10 +21,6 @@ from test_meshcat_pcd import show_mesh
 from dataset import get_dataloader
 from scipy.spatial.transform import Rotation as R
 import trimesh
-
-tools_path = os.path.join(os.getenv('HOME'), 'acronym/acronym_tools/acronym/')
-sys.path.append(tools_path)
-from acronym_tools import create_gripper_marker
 
 def initialize_net(config_file, load_model, save_path, args):
     print('initializing net')
@@ -50,8 +46,8 @@ def initialize_loaders(data_pth, data_config, batch, size=None, include_val=Fals
     return train_loader
 
 def grasp_to_gripper(grasp_pose, translate=0.0, theta=np.pi/2):
-    '''                                                                                                                                                                                                                                                               
-    does a small conversion between the grasp frame and the actual gripper frame for IK                                                                                                                                                                               
+    '''                                                                                                                                                     
+    does a small conversion between the grasp frame and the actual gripper frame for IK                                                                     
     '''
     z_rot = np.eye(4)
     z_rot[2,3] = translate
@@ -61,18 +57,6 @@ def grasp_to_gripper(grasp_pose, translate=0.0, theta=np.pi/2):
     gripper_pose = np.matmul(z_tf, grasp_pose)
 
     return gripper_pose
-
-def visualize_grippers(grasps, name, color=(0,255,0)):
-    # gripper_marker = create_gripper_marker(color=list(color))
-    
-    vis = None
-    for i, g in enumerate(grasps):
-        g1 = grasp_to_gripper(g, translate=0.0, theta=0)
-        g2 = grasp_to_gripper(g, translate=-0.1, theta=np.pi/2)
-        g_mesh = trimesh.load('./gripper_models/panda_gripper/panda_gripper.obj')#copy.deepcopy(gripper_marker)
-        g2_mesh = trimesh.load('./gripper_models/full_hand_2f140.obj')#copy.deepcopy(gripper_marker)
-        vis = show_mesh(vis, [g_mesh, g2_mesh], [g1, g2], [1.0, 1.0], [name+'grasp'+str(i), 'r'], color=color)
-    return vis
 
 
 def cgn_infer(cgn, pcd, obj_mask=None, threshold=0.5):
@@ -107,8 +91,7 @@ def cgn_infer(cgn, pcd, obj_mask=None, threshold=0.5):
     success_mask = (confidence > threshold).nonzero()[0]
     if len(success_mask) == 0:
         print('failed to find successful grasps')
-        success_mask = np.zeros_like(confidence)
-        success_mask[np.argmax(confidence)] = 1
+        raise Exception
 
     return pred_grasps[success_mask], confidence[success_mask], downsample
 
@@ -116,9 +99,8 @@ def visualize(pcd, grasps, mc_vis=None):
     if mc_vis is None:
         mc_vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
     viz_points(mc_vis, pcd, name='pointcloud', color=(0,0,0), size=0.002)
-    # grasp_kp = get_key_points(grasps)
-    # viz_grasps(mc_vis, grasp_kp, name='gripper/', freq=1)
-    visualize_grippers([grasps[0]], 'start', color=(255,0,0))
+    grasp_kp = get_key_points(grasps)
+    viz_grasps(mc_vis, grasp_kp, name='gripper/', freq=1)
     
 def get_key_points(poses, include_sym=False):
     gripper_object = mesh_utils.create_gripper('panda', root_folder=cn_path)
@@ -138,48 +120,23 @@ if __name__=='__main__':
     parser.add_argument('--model', type=str, default='sg_score')
     parser.add_argument('--pos_weight', default=1.0)
     parser.add_argument('--threshold', default=0.9, type=float, help='success threshold for grasps')
+    parser.add_argument('--scene', default='005274.npz', help='file with demo scene loaded')
     args = parser.parse_args()
 
-    '''
+    ### Initialize net
+    contactnet, optim, config = initialize_net(args.config_path, load_model=True, save_path=args.load_path, args=args)
+    
     ### Get demo pointcloud
-    print('getting demo')nnn
-    arrays = np.load('005274.npz', allow_pickle=True)
+    print('getting demo')
+    arrays = np.load(args.scene, allow_pickle=True)
     [k0, k1, k2, k3, k4, k5] = arrays.files
     pcd_list, _, obj_mask, mean, cam_pose, _ = arrays[k0], arrays[k1], arrays[k2], arrays[k3], arrays[k4], arrays[k5]
     pointcloud = pcd_list[0]
-    '''
-    ### Initialize model
-    data_path = os.path.abspath('/home/alinasar/acronym/test_10')
-    contactnet, optim, config = initialize_net(args.config_path, load_model=True, save_path=args.load_path, args=args)
-    data_config = config['data']
-    loader = initialize_loaders(data_path, data_config, 3, args=args)
-    print('loader got.')
-
-    a = None
-    while a is None:
-        try:
-            a = next(iter(loader))
-        except:
-            pass
-    pcd_list, permute, obj_masks, pcd_mean, cam_poses, gt_dict = a
-    pointcloud = pcd_list[2,0,...]
-    obj_mask = obj_masks[2].to(torch.float32)
     
     ### Get pcd, pass into model
     print('inferring.')
     pred_grasps, pred_success, downsample = cgn_infer(contactnet, pointcloud, obj_mask, threshold=args.threshold)
     print('model pass.', pred_grasps.shape[0], 'grasps found.')
-
-    # embed()
-    pointcloud = pointcloud.detach().cpu().numpy()
-    # pred_grasps = pred_grasps.detach().cpu().numpy()
-    pcd_mean = pcd_mean.detach().cpu().numpy()
-    
-    pred_grasps[:,:3,3] += pcd_mean[2]
-    pointcloud[:,:3] += pcd_mean[2]
     
     ### Visualize
-    embed()
-    for g in pred_grasps:
-        visualize(pointcloud, [g])
-        e = input('enter')
+    visualize(pointcloud, pred_grasps)
