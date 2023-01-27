@@ -70,15 +70,15 @@ class PandaGripper(object):
             root_folder {str} -- base folder for model files (default: {''})
         """
         self.joint_limits = [0.0, 0.04]
-        self.root_folder = root_folder
+        self.root_folder = '/home/alinasar/subgoal-net' #root_folder
         
         self.default_pregrasp_configuration = 0.04
         if q is None:
             q = self.default_pregrasp_configuration
 
         self.q = q
-        fn_base = os.path.join(root_folder, 'gripper_models/panda_gripper/hand.stl')
-        fn_finger = os.path.join(root_folder, 'gripper_models/panda_gripper/finger.stl')
+        fn_base = os.path.join(self.root_folder, 'gripper_models/panda_gripper/hand.stl')
+        fn_finger = os.path.join(self.root_folder, 'gripper_models/panda_gripper/finger.stl')
 
         self.base = trimesh.load(fn_base)
         self.finger_l = trimesh.load(fn_finger)
@@ -97,7 +97,7 @@ class PandaGripper(object):
         self.contact_ray_directions = []
 
         # coords_path = os.path.join(root_folder, 'gripper_control_points/panda_gripper_coords.npy')
-        with open(os.path.join(root_folder,'gripper_control_points/panda_gripper_coords.pickle'), 'rb') as f:
+        with open(os.path.join(self.root_folder,'gripper_control_points/panda_gripper_coords.pickle'), 'rb') as f:
             self.finger_coords = pickle.load(f, encoding='latin1')
         finger_direction = self.finger_coords['gripper_right_center_flat'] - self.finger_coords['gripper_left_center_flat']
         self.contact_ray_origins.append(np.r_[self.finger_coords['gripper_left_center_flat'], 1])
@@ -140,6 +140,8 @@ class PandaGripper(object):
         """
 
         control_points = np.load(os.path.join(self.root_folder, 'gripper_control_points/panda.npy'), encoding='bytes')[:, :3]
+        # print(control_points)
+        # from IPython import embed; embed()
         if symmetric:
             control_points = [[0, 0, 0], control_points[1, :],control_points[0, :], control_points[-1, :], control_points[-2, :]]
         else:

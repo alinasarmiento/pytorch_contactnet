@@ -1,3 +1,4 @@
+
 from __future__ import print_function
 from __future__ import absolute_import
 
@@ -14,9 +15,9 @@ import pyrender
 import trimesh
 import trimesh.transformations as tra
 
-model_utils_path = os.path.join(os.getenv('HOME'), 'graspnet/graspnet/pytorch_contactnet/model/utils/')
-sys.path.append(model_utils_path)
+sys.path.append(os.path.join(os.getenv('HOME'), 'subgoal-net/model/utils/'))
 from mesh_utils import Object
+from test_meshcat_pcd import viz_pcd as V
 
 class SceneRenderer:
     def __init__(self, intrinsics=None, fov=np.pi / 6, caching=True, viewing_mode=False):
@@ -120,12 +121,12 @@ class SceneRenderer:
             path += 'obj'
         elif not path.endswith('.obj'):
             path += '.obj'
-        try:
+        try:            
             obj = Object(path)
             obj.rescale(scale)
 
             tmesh = obj.mesh
-            tmesh_mean = np.mean(tmesh.vertices, 0)
+            tmesh_mean = np.mean(tmesh.vertices, 0) #GREY
             tmesh.vertices -= np.expand_dims(tmesh_mean, 0)
 
             lbs = np.min(tmesh.vertices, 0)
@@ -141,12 +142,14 @@ class SceneRenderer:
                 'node': pyrender.Node(mesh=mesh, name=path + '_' + str(scale)),
                 'mesh_mean': np.expand_dims(tmesh_mean, 0),
             }
+            #print('context', context)
 
             self._cache[(path, scale)] = context
 
             return self._cache[(path, scale)]
-        except:
+        except Exception as e:
             pass
+            # raise Exception
         
     def change_scene(self, obj_paths, obj_scales, obj_transforms):
         """Remove current objects and add new ones to the scene 
@@ -165,15 +168,16 @@ class SceneRenderer:
             self._cache = {}
             
         for p,t,s in zip(obj_paths, obj_transforms, obj_scales):
-            #print(t)
             object_context = self._load_object(p, s)
             object_context = deepcopy(object_context)
 
             if object_context == None:
+                print('error loading object context!')
                 continue
             else:
                 self._scene.add_node(object_context['node'])
                 self._scene.set_pose(object_context['node'], t)
+                
 
         if self._viewer:
             self._viewer.render_lock.release()
@@ -243,7 +247,7 @@ class SceneRenderer:
 
         return color, depth, pc, transferred_pose
 
-    def render_labels(self, full_depth, obj_paths, obj_scales, render_pc=False):
+    def render_labels(self, full_depth, obj_paths, obj_scales, render_pc=False, target_obj=0):
         """Render instance segmentation map
         Arguments:
             full_depth {np.ndarray} -- HxW depth map
@@ -264,36 +268,37 @@ class SceneRenderer:
                     scene_object_nodes.append(n)
 
         obj_names = [path + '_' + str(scale) for path, scale in zip(obj_paths,obj_scales)]
-
-        
         pcs = {}
         output = np.zeros(full_depth.shape, np.uint8)
         for n in scene_object_nodes:
             n.mesh.is_visible = True
 
             depth = self.renderer.render(self._scene)[1]
+            
             mask = np.logical_and(
-               (np.abs(depth - full_depth) < 1e-6), np.abs(full_depth) > 0
+               (np.abs(depth - full_depth) < 1e-1), np.abs(full_depth) > 0.7
             )
+            #pc = self._to_pointcloud(full_depth*mask)
+            #V(pc, 'object')
+
             if not np.any(mask):
                 continue
-            if np.any(output[mask] != 0):
-                raise ValueError('wrong label')
+            #if np.any(output*mask != 0):
+            #    raise ValueError('wrong label')
             
-            indices = [i+1 for i, x in enumerate(obj_names) if x == n.name]
+            indices = [i for i, x in enumerate(obj_names) if x == n.name]
             for i in indices:
                 if not np.any(output==i):
-                    print('')
+                    #print('')
                     output[mask] = i
                     break 
 
             n.mesh.is_visible = False
-
             if render_pc:
-                pcs[i] = self._to_pointcloud(depth*mask)
+                pcs[i] = self._to_pointcloud(full_depth*mask)
             
         for n in self._scene.get_nodes():
             if n.name not in ['camera', 'parent']:
                 n.mesh.is_visible = True
         
-        return output, ['BACKGROUND'] + obj_names, pcs
+        return output, obj_names, pcs

@@ -5,6 +5,7 @@ import numpy as np
 import os
 import time
 import argparse
+import trimesh
 
 def scale_matrix(factor, origin=None):
     """Return matrix to scale by factor around origin in direction.
@@ -24,10 +25,9 @@ def scale_matrix(factor, origin=None):
         M[:3, 3] *= 1.0 - factor
     return M
 
-def meshcat_pcd_show(mc_vis, point_cloud, color=None, name=None):
+def meshcat_pcd_show(mc_vis, point_cloud, color=None, name=None, size=0.001):
     """
     Function to show a point cloud using meshcat. 
-
     mc_vis (meshcat.Visualizer): Interface to the visualizer 
     point_cloud (np.ndarray): Shape Nx3 or 3xN
     color (np.ndarray or list): Shape (3,)
@@ -35,16 +35,54 @@ def meshcat_pcd_show(mc_vis, point_cloud, color=None, name=None):
     if point_cloud.shape[0] != 3:
         point_cloud = np.transpose(point_cloud, axes=(1, 0))
     if color is None:
-        color = np.zeros_like(point_cloud) * 255
+        color_pts = np.zeros_like(point_cloud) * 255
+    else:
+        color_pts = np.zeros_like(point_cloud)
+        color_pts[0,:] = color[0]*255
+        color_pts[1,:] = color[1]*255
+        color_pts[2,:] = color[2]*255
     if name is None:
         name = 'scene/pcd'
 
     mc_vis[name].set_object(
         g.Points(
-            g.PointsGeometry(point_cloud, color=color),
-            g.PointsMaterial()
+            g.PointsGeometry(point_cloud, color=color_pts),
+            g.PointsMaterial(size=size)
     ))
 
+
+def show_mesh(vis, paths, poses, scales, names, clear=False,  opacity=1.0, color=(128,128,128)):
+    if vis is None:
+        vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
+    if clear:
+        vis['scene/'].delete()
+        vis['home/'].delete()
+        vis.delete()
+    color = int('%02x%02x%02x' % color, 16)
+
+    for i, (path, pose, scale, name) in enumerate(zip(paths, poses, scales, names)):
+        name = name.split('/')[-1]
+        trimesh_mesh = trimesh.exchange.load.load(path, file_type='obj')
+        if type(trimesh_mesh) == trimesh.Scene:
+            meshes = []
+            for g in trimesh_mesh.geometry:
+                meshes.append(trimesh_mesh.geometry[g])
+            trimesh_mesh = trimesh.util.concatenate(meshes)
+        scale_tf = trimesh.transformations.scale_matrix(scale)
+        trimesh_mesh = trimesh_mesh.apply_transform(scale_tf)
+        trimesh_mesh.vertices -= np.mean(trimesh_mesh.vertices, 0)
+        
+        trimesh_mesh = trimesh_mesh.apply_transform(pose)
+
+        verts = trimesh_mesh.vertices
+        faces = trimesh_mesh.faces
+        
+        material = meshcat.geometry.MeshLambertMaterial(color=color, reflectivity=0.0, opacity=opacity)
+        mcg_mesh = meshcat.geometry.TriangularMeshGeometry(verts, faces)
+        vis['scene/'+name].set_object(mcg_mesh, material)
+    return vis
+
+    
 def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
     """
     shows a sample grasp as represented by a little fork guy
@@ -54,8 +92,8 @@ def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
         name = 'scene/loop/'
     for i, gripper in enumerate(control_pt_list):
         color = np.zeros_like(gripper) * 255
-        wrist = gripper[[1, 0, 2], :]
-        wrist = np.transpose(wrist, axes=(1,0))
+        # wrist = gripper[[1, 0, 2], :]
+        # wrist = np.transpose(wrist, axes=(1,0))
         
         gripper = gripper[1:,:]
         gripper = gripper[[2, 0, 1, 3], :]
@@ -66,29 +104,73 @@ def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
             mc_vis[name+name_i].set_object(g.Line(g.PointsGeometry(gripper)))
             #mc_vis[name_i+'wrist'].set_object(g.Line(g.PointsGeometry(wrist)))
 
-def mesh_gripper(mc_vis, pose, name=None):
-    gripper_path = os.path.join(os.getenv('HOME'), 'graspnet/graspnet/pytorch_contactnet/gripper_models/panda_gripper/panda_gripper.obj')
+def mesh_gripper(mc_vis, pose, name=None, robotiq=False):
+    if robotiq:
+        gripper_path = os.path.join(os.getenv('HOME'), 'subgoal-net/gripper_models/robotiq_arg2f_base_link.stl')
+    else:
+        gripper_path = os.path.join(os.getenv('HOME'), 'subgoal-net/gripper_models/panda_gripper/panda_gripper.obj')
     gripper = meshcat.geometry.ObjMeshGeometry.from_file(gripper_path)
     if name is None:
         name = 'gripper'
     mc_vis['scene/'+name].set_object(gripper)
-    print('pose: ', pose)
+    # print('pose: ', pose)
     #mc_vis['scene/'+name].set_transform(pose)
     mc_vis['scene/'+name].set_transform(pose.astype(np.float64))
             
-def viz_pcd(np_pc, name, grasps=False, gripper=False, clear=False):
+def viz_pcd(np_pc, name, grasps=False, gripper=False, robotiq=False, clear=False, freq=1):
     vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
     #print('MeshCat URL: %s' % vis.url())
+    # vis['scene/'+name].delete()
     if clear:
         vis['scene'].delete()
         vis.delete()
     if grasps:
-        sample_grasp_show(vis, np_pc, name=name, freq=1)
+        sample_grasp_show(vis, np_pc, name=name, freq=freq)
     elif gripper:
-        mesh_gripper(vis, np_pc, name=name)
+        mesh_gripper(vis, np_pc, name=name, robotiq=robotiq)
     else:
         meshcat_pcd_show(vis, np_pc, name=name)
 
+
+def viz_scene(vis, paths, poses, scales, names, cmeans=None, clear=False, opacity=1.0, goal=False):
+    if vis is None:
+        vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')
+    if clear:
+        vis['scene/'].delete()
+        vis['home/'].delete()
+        vis.delete()
+    for i, (path, pose, scale, name) in enumerate(zip(paths, poses, scales, names)):
+        name = name.split('/')[-1]
+        if goal:
+            name = 'goal/' + name
+        print('path:', path)
+        trimesh_mesh = trimesh.exchange.load.load(path, file_type=path.split('.')[-1])
+        if type(trimesh_mesh) == trimesh.Scene:
+            meshes = []
+            for g in trimesh_mesh.geometry:
+                meshes.append(trimesh_mesh.geometry[g])
+            trimesh_mesh = trimesh.util.concatenate(meshes)
+
+        scale_tf = trimesh.transformations.scale_matrix(scale)
+        trimesh_mesh = trimesh_mesh.apply_transform(scale_tf)
+        if cmeans is None:
+            trimesh_mesh.vertices -= np.mean(trimesh_mesh.vertices,0) #trimesh_mesh.center_mass
+        else:
+            trimesh_mesh.vertices -= cmeans[i]
+        trimesh_mesh = trimesh_mesh.apply_transform(pose)
+
+        verts = trimesh_mesh.vertices
+        faces = trimesh_mesh.faces
+
+        color=(128, 128, 128)
+        color = int('%02x%02x%02x' % color, 16)
+
+        material = meshcat.geometry.MeshLambertMaterial(color=color, reflectivity=0.0, opacity=opacity)
+        mcg_mesh = meshcat.geometry.TriangularMeshGeometry(verts, faces)
+        vis['scene/'+name].set_object(mcg_mesh, material)
+        # print('pose: ', pose)
+    return vis
+        
             
 def visualize(args):
     vis = meshcat.Visualizer(zmq_url='tcp://127.0.0.1:6000')

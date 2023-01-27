@@ -11,6 +11,34 @@ import imageio
 from scipy.spatial.transform import Rotation as R
 sys.path.append('model/')
 import copy
+from IPython import embed
+from scipy import spatial
+from test_meshcat_pcd import viz_pcd as V
+
+def get_obj_surrounding(pcd, obj_mask, radius):
+    '''
+    gets points within a distance of an object in scene pointcloud
+    arguments:
+        pcd -- full pointcloud of entire cluttered scene
+        obj_mask -- segmentation mask of target object
+        radius -- max distance of points from any point in the target object
+    returns:
+        surround_mask -- mask of desired surrounding points
+    '''
+    obj_mask = obj_mask.view(-1).detach().cpu().numpy()
+    surround = pcd[np.logical_not(obj_mask), :]
+    tree = spatial.KDTree(surround)
+    neighbor_idxs = tree.query_ball_point(pcd[obj_mask, :], radius)
+    flat_neighbors = []
+    for a in neighbor_idxs:
+        flat_neighbors += a
+    surround_mask = np.unique(flat_neighbors)
+
+    # del(flat_neighbors)
+    # del(neighbor_idxs)
+    # gc.collect()
+
+    return surround_mask
 
 def load_scene_contacts(dataset_folder, test_split_only=False, num_test=None, scene_contacts_path='scene_contacts_new'):
     """
@@ -190,7 +218,6 @@ def reject_z_outliers(data): #, cam, m=1):
     Reject points that arise from bug in rendering (~5000 points at the camera location)
     '''
     d = np.linalg.norm(data[:,:3], axis=1)
-    np.save('d', data[:,:3])
     return data[d > 1]
 
 def regularize_pc_point_count(pc, npoints, use_farthest_point=False):
@@ -418,12 +445,20 @@ def load_contact_grasps(contact_list, data_config):
 
     num_pos_contacts = data_config['labels']['num_pos_contacts']
 
-    pos_contact_points = []
-    pos_contact_dirs = []
-    pos_finger_diffs = []
-    pos_approach_dirs = []
-    pos_grasp_transforms = []
-    for i,c in enumerate(contact_list):
+    batch_pos_contact_points = []
+    batch_pos_contact_dirs = []
+    batch_pos_finger_diffs = []
+    batch_pos_approach_dirs = []
+    batch_pos_grasp_transforms = []
+
+    for i,c in enumerate(contact_list): # for each batch
+        # embed()
+        pos_contact_points = []
+        pos_contact_dirs = []
+        pos_finger_diffs = []
+        pos_approach_dirs = []
+        pos_grasp_transforms = []
+
         contact_directions_01 = c['scene_contact_points'][:,0,:] - c['scene_contact_points'][:,1,:]
         all_contact_points = c['scene_contact_points'].reshape(-1,3)
         all_finger_diffs = np.maximum(np.linalg.norm(contact_directions_01,axis=1), np.finfo(np.float32).eps)
@@ -437,14 +472,12 @@ def load_contact_grasps(contact_list, data_config):
         pos_idcs = np.where(all_contact_suc>0)[0]
         if len(pos_idcs) == 0:
             continue
-        #print('all contact points', all_contact_points.shape)
-        #print('total positive contact points ', len(pos_idcs))
         all_pos_contact_points = all_contact_points[pos_idcs]
         all_pos_finger_diffs = all_finger_diffs[pos_idcs//2]
         all_pos_contact_dirs = all_contact_directions[pos_idcs]
         all_pos_approach_dirs = all_approach_directions[pos_idcs//2]
         all_grasp_transform = all_grasp_transform[pos_idcs//2]
-        
+
         # Use all positive contacts then mesh_utils with replacement
         if num_pos_contacts > len(all_pos_contact_points)/2:
             pos_sampled_contact_idcs = np.arange(len(all_pos_contact_points))
@@ -457,16 +490,106 @@ def load_contact_grasps(contact_list, data_config):
         pos_finger_diffs.append(all_pos_finger_diffs[pos_sampled_contact_idcs])
         pos_approach_dirs.append(all_pos_approach_dirs[pos_sampled_contact_idcs])
         pos_grasp_transforms.append(all_grasp_transform[pos_sampled_contact_idcs,:])
-        
+
+    #embed()
+
     scene_idcs = np.arange(0,len(pos_contact_points))
     contact_points = np.array(pos_contact_points)
     grasp_poses = np.array(pos_grasp_transforms)
     contact_dirs = np.array(pos_contact_dirs)
     finger_diffs = np.array(pos_finger_diffs)
     contact_approaches =  np.array(pos_approach_dirs)
+        
     return contact_points, grasp_poses, contact_dirs, contact_approaches, finger_diffs, scene_idcs
 
-def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, pos_contact_approaches, pos_finger_diffs, grasp_poses, data_config):
+def load_contact_grasps_aux(contact_list, data_config):
+    """
+    Loads fixed amount of contact grasp data per scene into tf CPU/GPU memory
+    Arguments:
+        contact_infos {list(dicts)} -- Per scene mesh: grasp contact information  
+        data_config {dict} -- data config
+    Returns:
+        [tf_pos_contact_points, tf_pos_contact_dirs, tf_pos_contact_offsets, 
+        tf_pos_contact_approaches, tf_pos_finger_diffs, tf_scene_idcs, 
+        all_obj_paths, all_obj_transforms] -- tf.constants with per scene grasp data, object paths/transforms in scene
+    """
+
+    num_pos_contacts = data_config['labels']['num_pos_contacts']
+
+    batch_pos_contact_points = []
+    batch_pos_contact_dirs = []
+    batch_pos_finger_diffs = []
+    batch_pos_approach_dirs = []
+    batch_pos_grasp_transforms = []
+    
+    for i,c in enumerate(contact_list): # for each batch
+        # embed()
+        pos_contact_points = []
+        pos_contact_dirs = []
+        pos_finger_diffs = []
+        pos_approach_dirs = []
+        pos_grasp_transforms = []
+        
+        for contacts, tfs, colliding in zip(c['scene_contact_points'], c['grasp_transforms'], c['var_dict'].item()['collision_labels']): # for each subgoal
+            if not colliding:
+                # print('getting contact points')
+                # from IPython import embed; embed()
+                contact_directions_01 = contacts[:,0,:] - contacts[:,1,:]
+                all_contact_points = contacts.reshape(-1,3)
+                all_finger_diffs = np.maximum(np.linalg.norm(contact_directions_01,axis=1), np.finfo(np.float32).eps)
+                all_contact_directions = np.empty((contact_directions_01.shape[0]*2, contact_directions_01.shape[1],))
+                all_contact_directions[0::2] = -contact_directions_01 / all_finger_diffs[:,np.newaxis]
+                all_contact_directions[1::2] = contact_directions_01 / all_finger_diffs[:,np.newaxis]
+                all_contact_suc = np.ones_like(all_contact_points[:,0])
+                all_grasp_transform = tfs.reshape(-1,4,4)
+                all_approach_directions = all_grasp_transform[:,:3,2]
+
+                pos_idcs = np.where(all_contact_suc>0)[0]
+                if len(pos_idcs) == 0:
+                    continue
+                all_pos_contact_points = all_contact_points[pos_idcs]
+                all_pos_finger_diffs = all_finger_diffs[pos_idcs//2]
+                all_pos_contact_dirs = all_contact_directions[pos_idcs]
+                all_pos_approach_dirs = all_approach_directions[pos_idcs//2]
+                all_grasp_transform = all_grasp_transform[pos_idcs//2]
+
+                # Use all positive contacts then mesh_utils with replacement
+                if num_pos_contacts > len(all_pos_contact_points)/2:
+                    pos_sampled_contact_idcs = np.arange(len(all_pos_contact_points))
+                    pos_sampled_contact_idcs_replacement = np.random.choice(np.arange(len(all_pos_contact_points)), num_pos_contacts*2 - len(all_pos_contact_points) , replace=True) 
+                    pos_sampled_contact_idcs= np.hstack((pos_sampled_contact_idcs, pos_sampled_contact_idcs_replacement))
+                else:
+                    pos_sampled_contact_idcs = np.random.choice(np.arange(len(all_pos_contact_points)), num_pos_contacts*2, replace=False)
+                pos_contact_points.append(all_pos_contact_points[pos_sampled_contact_idcs,:])
+                pos_contact_dirs.append(all_pos_contact_dirs[pos_sampled_contact_idcs,:])
+                pos_finger_diffs.append(all_pos_finger_diffs[pos_sampled_contact_idcs])
+                pos_approach_dirs.append(all_pos_approach_dirs[pos_sampled_contact_idcs])
+                pos_grasp_transforms.append(all_grasp_transform[pos_sampled_contact_idcs,:])
+            else:
+                pos_contact_points.append(np.zeros((num_pos_contacts*2, 3)))
+                pos_contact_dirs.append(np.zeros((num_pos_contacts*2, 3)))
+                pos_finger_diffs.append(np.zeros((num_pos_contacts*2,)))
+                pos_approach_dirs.append(np.zeros((num_pos_contacts*2, 3)))
+                pos_grasp_transforms.append(np.zeros((num_pos_contacts*2, 4, 4)))
+
+        batch_pos_contact_points.append(pos_contact_points)
+        batch_pos_contact_dirs.append(pos_contact_dirs)
+        batch_pos_finger_diffs.append(pos_finger_diffs)
+        batch_pos_approach_dirs.append(pos_approach_dirs)
+        batch_pos_grasp_transforms.append(pos_grasp_transforms)
+
+    # embed()
+    
+    scene_idcs = np.arange(0,len(batch_pos_contact_points))
+    contact_points = np.concatenate(batch_pos_contact_points, axis=2)
+    grasp_poses = np.concatenate(batch_pos_grasp_transforms, axis=3)
+    contact_dirs = np.concatenate(batch_pos_contact_dirs, axis=2)
+    finger_diffs = np.concatenate(batch_pos_finger_diffs, axis=1)
+    contact_approaches =  np.concatenate(batch_pos_approach_dirs, axis=2)
+        
+    return contact_points, grasp_poses, contact_dirs, contact_approaches, finger_diffs, scene_idcs
+
+def compute_labels(gt_dict, obs_pcds, cam_poses, data_config):
     """
     Project grasp labels defined on meshes onto rendered point cloud from a camera pose via nearest neighbor contacts within a maximum radius. 
     All points without nearby successful grasp contacts are considered negativ contact points.
@@ -479,8 +602,15 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
         pos_finger_diffs  -- respective grasp widths in the mesh scene (Mx1)
         data_config {dict} -- global config
     Returns:
-        [dir_labels_pc_cam, offset_labels_pc, grasp_success_labels_pc, approach_labels_pc_cam] -- Per-point contact success labels and per-contact pose labels in rendered point cloud
+        [dir_labels_pc_cam, offset_labels_pc, grasp_success_labels_pc, approach_labels_pc_cam] -- 
+        Per-point contact success labels and per-contact pose labels in rendered point cloud
     """
+    pos_contact_pts_mesh = gt_dict['contact_pts'] # B x SG x F x 3
+    pos_contact_dirs = gt_dict['base_dirs'] # B x SG x F x 3
+    pos_contact_approaches = gt_dict['approach_dirs'] # B x SG x F x 3
+    pos_finger_diffs = gt_dict['offsets'] # B x SG x F
+    grasp_poses = gt_dict['grasp_poses'] # B x SG x F x 4 x 4
+
     with torch.no_grad():
         nsample = data_config['k']
         radius = data_config['max_radius']
@@ -494,50 +624,29 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
         success_labels = []
         label_idxs = []
         pose_labels = []
-        for pcd, cam_pose, gt_pcd, gt_pose, gt_dir, gt_appr, gt_width in zip(obs_pcds, cam_poses, pos_contact_pts_mesh, grasp_poses, pos_contact_dirs, pos_contact_approaches, pos_finger_diffs):
-            # Convert ground truth point cloud to camera frame
-            '''
-            x_rot_mat = R.from_euler('xyz', [np.pi, 0, 0]).as_matrix()
-            gt_pcd = np.concatenate((gt_pcd, np.ones((gt_pcd.shape[0], 1))), 1)
-            gt_pcd_cam = np.matmul(gt_pcd, np.linalg.inv(cam_pose).T)[:, :3]
-            gt_pcd_cam = np.matmul(x_rot_mat, gt_pcd_cam.T).T
-            np.save('pos_pts_recent', gt_pcd_cam)
-            # Convert ground truth grasp vectors (approach and baseline) to camera frame
-            gt_dir = np.concatenate((gt_dir[0], np.zeros((gt_dir[0].shape[0], 1))), 1)
-            gt_dir = np.matmul(gt_dir, np.linalg.inv(cam_pose).T)[:, :3]
-            gt_dir = np.matmul(x_rot_mat, gt_dir.T).T
-            gt_appr = np.concatenate((gt_appr[0], np.zeros((gt_appr[0].shape[0], 1))), 1)
-            gt_appr = np.matmul(gt_appr, np.linalg.inv(cam_pose).T)[:, :3]
-            gt_appr = np.matmul(x_rot_mat, gt_appr.T).T
-
-            hom = np.zeros((1, 3))
-            trans = np.array([[0, 0, 0, 1]]).T
-            x_rot_mat = np.concatenate((x_rot_mat, hom), 0)
-            x_rot_mat = np.concatenate((x_rot_mat, trans), 1)
-
-            # Convert ground truth grasp poses to camera frame
-            gt_pose = np.matmul(np.linalg.inv(cam_pose), gt_pose)
-            gt_pose = np.matmul(x_rot_mat, gt_pose)        
-            '''
+        for i, (pcd, cam_pose, gt_pcd, gt_pose, gt_dir, gt_appr, gt_width) in enumerate(zip(obs_pcds, cam_poses, pos_contact_pts_mesh, grasp_poses, \
+                                                                                            pos_contact_dirs, pos_contact_approaches, pos_finger_diffs)):
             pose_labels.append(gt_pose)
             # Find K nearest neighbors to each point from labeled contacts
             knn_tree = KDTree(gt_pcd)
             d, indices = knn_tree.query(pcd, distance_upper_bound=radius)
-
-            #indices = knn_tree.query_ball_point(gt_pcd, radius) # M x k x 1
+            
             # Create corresponding lists for baseline, approach, width, and binary success
             dirs = np.zeros_like(pcd)
             approaches = np.zeros_like(pcd)
             widths = np.zeros([N, 1])
             idx_array = []
-            pos_labels = np.array([])
-            gt_dir = gt_dir[0]
-            gt_appr = gt_appr[0]
-            
+            gt_dir = gt_dir
+            gt_appr = gt_appr
+
+            # print(indices.shape)
+            # from IPython import embed; embed()
             for pcd_i, label_i in enumerate(indices):
+                # print(label_i)
+                # print(len(gt_pcd))
                 if label_i == len(gt_pcd):
                     continue
-                
+                    
                 dir_label = gt_dir[label_i]
                 appr_label = gt_appr[label_i]
                 width_label = gt_width[0, :][label_i]
@@ -548,6 +657,7 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
 
             label_idxs.append(np.array(idx_array))
             success = np.where(widths>0, 1, 0)
+
             dir_labels.append(dirs)
             approach_labels.append(approaches)
             width_labels.append(widths)
@@ -560,6 +670,186 @@ def compute_labels(pos_contact_pts_mesh, obs_pcds, cam_poses, pos_contact_dirs, 
         approach_labels = torch.Tensor(np.stack(approach_labels)).float()
 
         return [pose_labels, label_idxs, dir_labels, width_labels, success_labels, approach_labels]
+
+
+def compute_labels_single(gt_dict, pcd_list, cam_pose, data_config):
+    """
+    Project grasp labels defined on meshes onto rendered point cloud from a camera pose via nearest neighbor contacts within a maximum radius. 
+    All points without nearby successful grasp contacts are considered negativ contact points.
+    Arguments:
+        gt_dict  -- ground truth dictionary
+        obs_pcds -- observed pointclouds in camera reference frame (bxNx3)
+        cam_poses -- pose of each camera in world frame (bx4x4)
+        data_config {dict} -- global config
+    Returns:
+        [dir_labels_pc_cam, offset_labels_pc, grasp_success_labels_pc, approach_labels_pc_cam] -- 
+        Per-point contact success labels and per-contact pose labels in rendered point cloud
+    """
+    pos_contact_pts_mesh = gt_dict['contact_pts'] # B x SG x F x 3
+    pos_contact_dirs = gt_dict['base_dirs'] # B x SG x F x 3
+    pos_contact_approaches = gt_dict['approach_dirs'] # B x SG x F x 3
+    pos_finger_diffs = gt_dict['offsets'] # B x SG x F
+    grasp_poses = gt_dict['grasp_poses'] # B x SG x F x 4 x 4
+    sg, F, N = pos_contact_pts_mesh.shape[0], pos_contact_pts_mesh.shape[1], pcd_list.shape[1]
+    
+    nsample = data_config['k']
+    radius = 0.008 #data_config['max_radius']
+    filter_z = data_config['filter_z']
+    z_val = data_config['z_val']
+    
+    with torch.no_grad():
+        pos_contact_pts_mesh = pos_contact_pts_mesh.reshape(sg, -1, 3)
+        dir_labels = []
+        approach_labels = []
+        width_labels = []
+        success_labels = []
+        label_idxs = []
+        pose_labels = []
+
+        for i, (pcd, gt_pcd, gt_pose, gt_dir, gt_appr, gt_width) in enumerate(zip(pcd_list, pos_contact_pts_mesh, grasp_poses, \
+                                                                                            pos_contact_dirs, pos_contact_approaches, pos_finger_diffs)):
+            pose_labels.append(gt_pose)
+            # Find K nearest neighbors to each point from labeled contacts
+            knn_tree = KDTree(gt_pcd)
+            d, indices = knn_tree.query(pcd, distance_upper_bound=radius)
+
+            # Create corresponding lists for baseline, approach, width, and binary success
+            dirs = np.zeros_like(pcd)
+            approaches = np.zeros_like(pcd)
+            widths = np.zeros([N, 1])
+            idx_array = []
+
+            for pcd_i, label_i in enumerate(indices):
+                if label_i == len(gt_pcd):
+                    continue
+                dir_label = gt_dir[label_i]
+                appr_label = gt_appr[label_i]
+                width_label = gt_width[label_i]
+                pose_label = gt_pose[label_i]
+                idx_array.append([pcd_i, label_i])
+                dirs[pcd_i] = dir_label
+                approaches[pcd_i] = appr_label
+                widths[pcd_i] = width_label
+
+            label_idxs.append(np.array(idx_array))
+
+            success = np.where(widths>0, 1, 0)
+
+            dir_labels.append(dirs)
+            approach_labels.append(approaches)
+            width_labels.append(widths)
+            success_labels.append(success)
+
+        pose_labels = torch.Tensor(np.stack(pose_labels))
+        dir_labels = torch.Tensor(np.stack(dir_labels)).float()
+        width_labels = torch.Tensor(np.stack(width_labels)).float()
+        success_labels = torch.Tensor(np.stack(success_labels)).float()
+        approach_labels = torch.Tensor(np.stack(approach_labels)).float()
+
+        return [pose_labels, label_idxs, dir_labels, approach_labels, width_labels, success_labels]
+
+    
+def compute_labels_aux(gt_dict, obs_pcds, cam_poses, data_config):
+    """
+    Project grasp labels defined on meshes onto rendered point cloud from a camera pose via nearest neighbor contacts within a maximum radius. 
+    All points without nearby successful grasp contacts are considered negativ contact points.
+    Arguments:
+        gt_dict  -- ground truth dictionary
+        obs_pcds -- observed pointclouds in camera reference frame (bxNx3)
+        cam_poses -- pose of each camera in world frame (bx4x4)
+        data_config {dict} -- global config
+    Returns:
+        [dir_labels_pc_cam, offset_labels_pc, grasp_success_labels_pc, approach_labels_pc_cam] -- 
+        Per-point contact success labels and per-contact pose labels in rendered point cloud
+    """
+    contacts = gt_dict['contact_pts'] # B x SG x F x 3
+    bases = gt_dict['base_dirs'] # B x SG x F x 3
+    apprs = gt_dict['approach_dirs'] # B x SG x F x 3
+    widths = gt_dict['offsets'] # B x SG x F
+    poses  = gt_dict['grasp_poses'] # B x SG x F x 4 x 4
+    collision_labels = gt_dict['collision_labels'] # B x SG (booleans)
+    b, sg, F, N = contacts.shape[0], contacts.shape[1], contacts.shape[2], obs_pcds.shape[2] #data_config['num_points']
+    
+    # collision_labels = torch.cat([c.expand(1, b) for c in collision_labels], dim=0)
+    # collision_labels = collision_labels.T
+    nsample = data_config['k']
+    radius = 0.008 #data_config['max_radius']
+    filter_z = data_config['filter_z']
+    z_val = data_config['z_val']
+
+    full_poses = []
+    full_bases = []
+    full_apprs = []
+    full_widths = []
+    full_s = []
+    full_idxs = []
+    
+    with torch.no_grad():
+        for pcd_list, pos_contact_pts_mesh, pos_contact_dirs, pos_contact_approaches, pos_finger_diffs, grasp_poses, colliding, cam_pose in \
+            zip(obs_pcds, contacts, bases, apprs, widths, poses, collision_labels, cam_poses): # for each sample in batch
+            pos_contact_pts_mesh = pos_contact_pts_mesh.reshape(sg, -1, 3)
+            dir_labels = []
+            approach_labels = []
+            width_labels = []
+            success_labels = []
+            label_idxs = []
+            pose_labels = []
+            
+            for i, (pcd, gt_pcd, gt_pose, gt_dir, gt_appr, gt_width) in enumerate(zip(pcd_list, pos_contact_pts_mesh, grasp_poses, \
+                                                                                                pos_contact_dirs, pos_contact_approaches, pos_finger_diffs)):
+
+                pose_labels.append(gt_pose)
+                # Find K nearest neighbors to each point from labeled contacts
+                knn_tree = KDTree(gt_pcd)
+                d, indices = knn_tree.query(pcd, distance_upper_bound=radius)
+
+                # Create corresponding lists for baseline, approach, width, and binary success
+                dirs = np.zeros_like(pcd)
+                approaches = np.zeros_like(pcd)
+                widths = np.zeros([N, 1])
+                idx_array = []
+
+                for pcd_i, label_i in enumerate(indices):
+                    # print(label_i)
+                    # print(len(gt_pcd))
+                    if label_i == len(gt_pcd):
+                        continue
+                    dir_label = gt_dir[label_i]
+                    appr_label = gt_appr[label_i]
+                    width_label = gt_width[label_i]
+                    pose_label = gt_pose[label_i]
+                    idx_array.append([pcd_i, label_i])
+                    dirs[pcd_i] = dir_label
+                    approaches[pcd_i] = appr_label
+                    widths[pcd_i] = width_label
+
+                label_idxs.append(np.array(idx_array))
+
+                success = np.where(widths>0, 1, 0)
+
+                dir_labels.append(dirs)
+                approach_labels.append(approaches)
+                width_labels.append(widths)
+                success_labels.append(success)
+
+            pose_labels = torch.Tensor(np.stack(pose_labels))
+            dir_labels = torch.Tensor(np.stack(dir_labels)).float()
+            width_labels = torch.Tensor(np.stack(width_labels)).float()
+            success_labels = torch.Tensor(np.stack(success_labels)).float()
+            approach_labels = torch.Tensor(np.stack(approach_labels)).float()
+            
+            full_bases.append(torch.where(colliding, torch.empty(N, 3, sg), dir_labels.permute(1,2,0)).permute(2,0,1))
+            full_apprs.append(torch.where(colliding, torch.empty(N, 3, sg), approach_labels.permute(1,2,0)).permute(2,0,1))
+            full_widths.append(torch.where(colliding, torch.empty(N, 1, sg), width_labels.permute(1,2,0)).permute(2,0,1))
+            full_s.append(torch.where(colliding, torch.empty(N, 1, sg), success_labels.permute(1,2,0)).permute(2,0,1))
+            full_idxs.append(label_idxs)
+
+        full_bases = torch.cat([c.unsqueeze(0) for c in full_bases], dim=0)
+        full_apprs = torch.cat([c.unsqueeze(0) for c in full_apprs], dim=0)
+        full_widths = torch.cat([c.unsqueeze(0) for c in full_widths], dim=0)
+        full_s = torch.cat([c.unsqueeze(0) for c in full_s], dim=0)
+
+        return [poses, full_idxs, full_bases, full_apprs, full_widths, full_s, collision_labels]#[pose_labels, label_idxs, dir_labels, width_labels, success_labels, approach_labels]
 
 class PointCloudReader:
     """
@@ -810,7 +1100,7 @@ class PointCloudReader:
         pc = reject_z_outliers(pc)
 
         '''
-        # transform point cloud to world frame                                                                                                                                                              
+        # transform point cloud to world frame
         #pc_hom = np.concatenate((pc, np.ones((pc.shape[0], 1))), 1).T
         xr = R.from_euler('x', np.pi, degrees=False)
         x_rot = np.eye(4)
@@ -832,7 +1122,7 @@ class PointCloudReader:
             cad_scale {float} -- scale of CAD model
         """
 
-        self._renderer.change_object(cad_path, cad_scale)
+        self._renderer.change_scene([cad_path], [cad_scale],[np.eye(4)])
 
     def change_scene(self, obj_paths, obj_scales, obj_transforms, visualize=False):
         """

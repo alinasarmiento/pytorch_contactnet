@@ -8,7 +8,7 @@ import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import fps
+from torch_geometric.nn import fps, knn_interpolate
 from torchvision import transforms, utils
 from torch.utils.data import DataLoader, Dataset
 import model.utils.pcd_utils as utils
@@ -16,6 +16,7 @@ import model.utils.mesh_utils as mesh_utils
 sys.path.append('../pointnet2')
 from pointnet2.models_pointnet import FPModule, SAModule, MLP
 from test_meshcat_pcd import viz_pcd as V
+from data_utils import get_obj_surrounding
 
 class ContactNet(nn.Module):
     def __init__(self, config, device):
@@ -27,8 +28,13 @@ class ContactNet(nn.Module):
         self.set_abstract_final = self.SAnet(config['model']['sa_final']) #final set abstraction model without multi-scale grouping
         self.feat_prop = self.FPnet(config['model']['fp']) #feature propagation 
         self.multihead = self.Multihead(config['model']['multi']) #final multihead for 2 vectors, confidence, and width
+
+        self.success_sigmoid = nn.Sigmoid().to(self.device)
+        self.width_relu = nn.ReLU().to(self.device)
         
-    def forward(self, input_pcd, pos, batch, idx, k=None, width_labels=None):
+        self.conf_loss_fn = nn.BCEWithLogitsLoss(reduction='none').to(self.device) #nn.BCEWithLogitsLoss(reduction='none', pos_weight=torch.tensor([1])).to(self.device)
+        
+    def forward(self, input_pcd, pos, batch, idx, obj_mask, width_labels=None):
         '''
         maps each point in the pointcloud to a generated grasp
         Arguments
@@ -40,8 +46,6 @@ class ContactNet(nn.Module):
         # Step 1: PointNet++ Set Aggregation (with multi-scale grouping)
 
         sample_pts = input_pcd.float()
-        if k is not None:
-            sample_pts = utils.farthest_point_downsample(input_pcd, k)
         input_list = (sample_pts, pos, batch)
         skip_layers = [input_list]
         for mod_idx, module_list in enumerate(self.set_abstract_msg):
@@ -58,7 +62,6 @@ class ContactNet(nn.Module):
         feat = self.set_abstract_final(input_list[0])
         skip_layers.insert(0, (feat, input_list[1], input_list[2]))
 
-
         # Step 2: PointNet++ Feature Propagation
 
         for module, skip in zip(self.feat_prop, skip_layers[1:]):
@@ -68,19 +71,19 @@ class ContactNet(nn.Module):
         point_features = torch.cat((points, point_features), 1)
         point_features = torch.unsqueeze(point_features, 0)
         point_features = point_features.transpose(1, 2)
-
         
         # Step 3: Final Multihead Output
 
         finals = []
-        for net in self.multihead:
+        for net in self.multihead[1:]:
             result = torch.flatten(net(point_features).transpose(1,2), start_dim=0, end_dim=1)
             finals.append(result)
-        s, z1, z2, w = finals # confidence prediction, grasp vector 1, grasp vector 2, grasp width
+        z1, z2, w = finals # confidence prediction, grasp vector 1, grasp vector 2, grasp width
 
         z1 = z1/torch.linalg.norm(z1, dim=1, keepdim=True)
         z2 = z2 - torch.sum(z1*z2, dim=-1, keepdim=True)*z1
         z2 = z2/torch.linalg.norm(z2, dim=1, keepdim=True)
+        w = torch.clamp(w, min=-0.08, max=0.08)
         
         # build final grasps
         final_grasps = self.build_6d_grasps(points, z1, z2, w, self.config['gripper_depth'], width_labels)
@@ -93,23 +96,20 @@ class ContactNet(nn.Module):
 
         points = input_list[1].view(pts_shape).to(self.device)
         final_grasps = final_grasps.view(grasp_shape).to(self.device)
-        success_sigmoid = nn.Sigmoid().to(self.device)
-        width_relu = nn.ReLU().to(self.device)
-        s = success_sigmoid(s) #.to(self.device)
-        w = width_relu(w)#.to(self.device)
+        s = torch.flatten(self.multihead[0](point_features).transpose(1,2), start_dim=0, end_dim=1)
+        
+        # s = self.success_sigmoid(s) #.to(self.device)
+        w = self.width_relu(w)#.to(self.device)
         s = s.view(scalar_shape)#.to(self.device)
         w = w.view(scalar_shape)#.to(self.device)
-        
-        #save first batch point cloud
-        return points, final_grasps, s, w
-                
-    def filter_segment(self, seg_mask, grasps):
-        '''
-        filters out grasps to just the provided segmentation mask
-        '''
-        filtered_grasps = grasps[seg_mask]
-        return filtered_grasps
+        point_features = point_features.transpose(1,2)
+        point_features = point_features.view(num_batches, -1, 131)
+        points = points.view(num_batches, -1, 3)
 
+        collide_pred_list = None
+        
+        return points, final_grasps, s, w, point_features, collide_pred_list
+                
     def build_6d_grasps(self, contact_pts, z1, z2, w, gripper_depth=0.1034, width_labels=None):
         '''
         builds full 6 dimensional grasps based on generated vectors, width, and pointcloud
@@ -130,46 +130,53 @@ class ContactNet(nn.Module):
             grasp[:3,1] = grasp_y / torch.linalg.norm(grasp_y)
 
             grasp[:3,3] = contact_pts[i] - gripper_depth*grasp.clone()[:3,2].to(self.device) + (w[i]/2)*grasp.clone()[:3,0].to(self.device)
+
+            if torch.linalg.norm(grasp[:3,3]) > 100:
+                print('grasp building issue')
+                from IPython import embed; embed()
             grasps.append(grasp)
             
         grasps = torch.stack(grasps).to(self.device)
         return grasps
 
-    def loss(self, pred_grasps, pred_success, pred_width, labels_dict, args):
-        '''
-        returns loss as described in original paper
+    def get_key_points(self, grasps_list, include_sym=False):
+        pts_list = []
+        gripper_object = mesh_utils.create_gripper('panda', root_folder='/home/alinasar/subgoal-net')
+
+        for poses in grasps_list:
+            gripper_np = gripper_object.get_control_point_tensor(poses.shape[0])
+            hom = np.ones((gripper_np.shape[0], gripper_np.shape[1], 1))
+            gripper_pts = torch.Tensor(np.concatenate((gripper_np, hom), 2)).transpose(1,2).to(self.device)
+            pts = torch.matmul(poses, gripper_pts).transpose(1,2)
+
+            if include_sym:
+                sym_gripper_np = gripper_object.get_control_point_tensor(poses.shape[0], symmetric=True)
+                sym_gripper_pts = torch.Tensor(np.concatenate((sym_gripper_np, hom), 2)).transpose(1,2).to(self.device)
+                sym_pts = torch.matmul(poses, sym_gripper_pts).transpose(1,2)
+                pts_list.append([pts, sym_pts])
+            else:
+                pts_list.append(pts)
+
+        return pts_list
         
+    
+    def pose_loss(self, pred_grasps, pred_width, pred_successes, labels_dict, gt_dict, sg_i, collide, args):
+        '''
         labels_dict
             success (boolean)
             grasps (6d grasps)
         '''
-        success_idxs = labels_dict['success_idxs']
-        success_labels = np.array(labels_dict['success'])
-        grasp_labels = labels_dict['grasps']
-        width_labels = labels_dict['width']
-        success_labels = success_labels.reshape(success_labels.shape[0], -1) #np.transpose(success_labels, axes=(0,2,1))
         
-        success_labels = torch.Tensor(success_labels).to(self.device)            
-
-        # -- GRASP CONFIDENCE LOSS --
-        # Use binary cross entropy loss on predicted success to find top-k preds with largest loss
-        conf_loss_fn = nn.BCELoss(reduction='none').to(self.device)
-        conf_loss = torch.mean(torch.topk(conf_loss_fn(pred_success, success_labels), k=512)[0]).to(self.device)
-
-        #############                                                                                                                                                                   
-        # experimental                                                                                                                                                                  
-        '''
-        pos_conf_lossfn = nn.BCELoss(reduction='none').to(self.device)
-        pos_s = torch.where(success_labels==1)
-        pos_s_labels = success_labels[pos_s]
-        pos_s_pred = pred_success[pos_s]
-        pos_s_loss = torch.mean(pos_conf_lossfn(pos_s_pred, pos_s_labels)).to(self.device)
-
-        conf_loss = 0.7*conf_loss_pure + 0.3*pos_s_loss
-        '''
-        #############
-
-        
+        # success_idxs = np.array(labels_dict['init_success_idxs'], dtype=object)
+        try:
+            success_idxs = list(np.vstack(np.array(labels_dict['success_idxs'], dtype=object))[:,sg_i]) #np.array(labels_dict['success_idxs'], dtype=object)[:,sg_i]
+        except:
+            print('we got a problem :(')
+            from IPython import embed; embed()
+        grasp_labels = labels_dict['grasps'][:,sg_i,:]
+        width_labels = labels_dict['width'][:,sg_i,:]
+        obj_masks = labels_dict['obj_masks']
+                    
         # -- GEOMETRIC LOSS --
         # Turn each gripper control point into a pose object
         
@@ -179,110 +186,119 @@ class ContactNet(nn.Module):
         pos_pred_list = []
         width_label_list = []
         pred_width_list = []
-
         empty_idx = []
+        label_idx_list = []
+
+        obj_mask_list = []
+
         for batch, idx_list in enumerate(success_idxs):
+            if not np.any(idx_list):
+                idx_list = np.array([[0, 0]])
+            idx_list = idx_list.T
             try:
-                idx_list = idx_list.T
-                point_idxs = idx_list[0]
-                label_idxs = idx_list[1]
-                pos_labels = grasp_labels[batch, label_idxs, :4, :4]
-                pos_pred = pred_grasps[batch, point_idxs, :4, :4]
-                width_labels_masked = width_labels[batch, point_idxs]
-                pred_width_masked = pred_width[batch, point_idxs]
-
-                pos_label_list.append(pos_labels)
-                pos_pred_list.append(pos_pred)
-                width_label_list.append(width_labels_masked)
-                pred_width_list.append(pred_width_masked)
+                point_idxs = idx_list[0].astype(int)
+                label_idxs = idx_list[1].astype(int)
             except:
-                empty_idx.append(batch)
-                print('idx_list is mysteriously empty...')
+                from IPython import embed; embed()
+            obj_mask = np.nonzero(obj_masks[batch])[0]
+            obj_mask = np.isin(point_idxs, obj_mask)
+            obj_mask_list.append(obj_mask)
+            pose_point_idxs = point_idxs #[obj_mask]
+            pose_label_idxs = label_idxs #[obj_mask]
 
+            try:
+                pos_labels = grasp_labels[batch, pose_label_idxs, :4, :4]
+            except:
+                print('error')
+                from IPython import embed; embed()
+            pos_pred = pred_grasps[batch, pose_point_idxs, :4, :4]
+            width_labels_masked = width_labels[batch, point_idxs]
+            pred_width_masked = pred_width[batch, point_idxs]
+
+            pos_label_list.append(pos_labels)
+            pos_pred_list.append(pos_pred)
+            width_label_list.append(width_labels_masked)
+            pred_width_list.append(pred_width_masked)
+            label_idx_list.append(pose_point_idxs)
+
+        # print('width loss')
+        # from IPython import embed; embed()
         # -- WIDTH LOSS --
         # calculates loss on 10 grasp width bins using a sigmoid fn and binary cross entropy
+        width_loss = torch.tensor(0.0).to(self.device)
+        for w_labels, w_pred, c in zip(width_label_list, pred_width_list, collide):
+            if not c:
+                w_labels = w_labels.to(self.device)
+                w_labels = w_labels.view(1, -1)
+                w_pred = w_pred.view(1, -1)
+                # width_labels = width_labels.reshape(width_labels.shape[0], -1)
+
+                width_loss_fn = nn.MSELoss().to(self.device)
+                raw_width_loss = width_loss_fn(w_pred, w_labels)#nn.BCEWithLogitsLoss(pred_width, width_labels)
+                width_loss += raw_width_loss
+            else:
+                pass
+        # embed()
+        if width_loss != 0:
+            width_loss = width_loss/sum(torch.logical_not(collide))
 
         
-        
-        width_labels = torch.Tensor(np.array(width_labels)).to(self.device)
-        width_labels = width_labels.reshape(width_labels.shape[0], -1)
+        label_pts_list = self.get_key_points(pos_label_list, include_sym=True)
+        pred_pts_list = self.get_key_points(pos_pred_list)
+        # label_pts_list = []
+        # pred_pts_list = []
+        # gripper_object = mesh_utils.create_gripper('panda', root_folder=args.root_path)
 
-        width_loss_fn = nn.MSELoss().to(self.device)
-        raw_width_loss = width_loss_fn(pred_width, width_labels)#nn.BCEWithLogitsLoss(pred_width, width_labels)
-        width_loss = raw_width_loss #np.mean(masked_width_loss)        
+        # for pos_labels, pos_pred in zip(pos_label_list, pos_pred_list):
+        #     gripper_np = gripper_object.get_control_point_tensor(pos_labels.shape[0])
+        #     sym_gripper_np = gripper_object.get_control_point_tensor(pos_labels.shape[0], symmetric=True)
+        #     hom = np.ones((gripper_np.shape[0], gripper_np.shape[1], 1))
+        #     gripper_pts = torch.Tensor(np.concatenate((gripper_np, hom), 2)).transpose(1,2).to(self.device)
+        #     sym_gripper_pts = torch.Tensor(np.concatenate((sym_gripper_np, hom), 2)).transpose(1,2).to(self.device)
 
-        ############# VISUALIZATION
-        # create a predicted success mask (above a threshold)
-        success_threshold = 0.19
-        pred_s_grasp_list = []
-        pred_s_mask_list = []
-        for batch, pred_success_list in enumerate(pred_success):
-            pred_success_mask = np.argwhere((pred_success_list.detach().cpu().numpy() > success_threshold))
-            pred_s_grasps = pred_grasps[batch, pred_success_mask, :4, :4]
-            pred_s_grasp_list.append(pred_s_grasps[:, 0, :, :])
-            pred_s_mask_list.append(pred_success_mask)
+        #     label_pts = torch.matmul(pos_labels, gripper_pts).transpose(1,2)
+        #     sym_label_pts = torch.matmul(pos_labels, sym_gripper_pts).transpose(1,2)
+        #     pred_pts = torch.matmul(pos_pred, gripper_pts).transpose(1,2)
 
-        np.save('pred_s_mask', pred_success[0].detach().cpu().numpy())
-            
-        label_pts_list = []
-        pred_pts_list = []
-        #s_pts_list = []
-        gripper_object = mesh_utils.create_gripper('panda', root_folder=args.root_path)
+        #     label_pts_list.append([label_pts, sym_label_pts])
+        #     pred_pts_list.append(pred_pts)
 
-        for pos_labels, pos_pred, pred_s_grasps in zip(pos_label_list, pos_pred_list, pred_s_grasp_list):
-
-            gripper_np = gripper_object.get_control_point_tensor(pos_labels.shape[0])
-            sym_gripper_np = gripper_object.get_control_point_tensor(pos_labels.shape[0], symmetric=True)
-            hom = np.ones((gripper_np.shape[0], gripper_np.shape[1], 1))
-            gripper_pts = torch.Tensor(np.concatenate((gripper_np, hom), 2)).transpose(1,2).to(self.device)
-            sym_gripper_pts = torch.Tensor(np.concatenate((sym_gripper_np, hom), 2)).transpose(1,2).to(self.device)
-            
-            #success_mask_gripper = gripper_object.get_control_point_tensor(pred_s_grasps.shape[0])
-            #hom2 = np.ones((success_mask_gripper.shape[0], success_mask_gripper.shape[1], 1))
-            #sm_gripper_pts = torch.Tensor(np.concatenate((success_mask_gripper, hom2), 2)).transpose(1,2).to(self.device)
-            #pred_s_pts = torch.matmul(pred_s_grasps, sm_gripper_pts).transpose(1,2)
-            #s_pts_list.append(pred_s_pts)
-            
-            label_pts = torch.matmul(pos_labels, gripper_pts).transpose(1,2)
-            sym_label_pts = torch.matmul(pos_labels, sym_gripper_pts).transpose(1,2)
-            pred_pts = torch.matmul(pos_pred, gripper_pts).transpose(1,2)
-
-            
-            label_pts_list.append([label_pts, sym_label_pts])
-            pred_pts_list.append(pred_pts)
-
-        
         pred_pts1 = pred_pts_list[0][:,:,:3]
-        #pred_pts2 = pred_pts_list[1][:,:,:3]
-        np.save('control_pt_list', pred_pts1.detach().cpu().numpy())
+        label_pts1 = label_pts_list[0][0][:,:,:3]
         if args.viz:
             V(pred_pts1.detach().cpu().numpy(), 'pred/', grasps=True)
-        label_pts1 = label_pts_list[0][0][:,:,:3]
-        np.save('label_pt_list', label_pts1.detach().cpu().numpy())
-        '''
-        pred_s_pts = s_pts_list[0][:,:,:3]
-        np.save('visualization/success_pt_list_many', pred_s_pts.detach().cpu().numpy())
-        '''
-        # Compare symmetric predicted and label control points to calculate "add-s" loss
-        add_s_loss_total = torch.Tensor([0]).to(self.device)
-        for success_idx, pred_success_list, pred_pts, label_pts in zip(success_idxs, pred_success, pred_pts_list, label_pts_list):
-            point_success_mask = success_idx[:, 0]
-            pred_pts = pred_pts[:, :, :3]
-            label_pts_1 = label_pts[0][:, :, :3]
-            label_pts_2 = label_pts[1][:, :, :3]
+            V(label_pts1.detach().cpu().numpy(), 'label/', grasps=True)
 
-            pred_success_masked = pred_success_list[point_success_mask]
+        s_sig = nn.Sigmoid().to(self.device)
+        # -- ADD-S GEOMETRIC LOSS --
+        geom_loss_list = [] #torch.Tensor([0]).to(self.device)
+        try:
+            for success_idx, pred_pts, label_pts, pred_success_list in zip(success_idxs, pred_pts_list, label_pts_list, pred_successes):
+                if len(success_idx) != 0:
+                    point_success_mask = success_idx[:, 0]
+                    pred_pts = pred_pts[:, :, :3]
+                    label_pts_1 = label_pts[0][:, :, :3]
+                    label_pts_2 = label_pts[1][:, :, :3]
 
-            norm_1 = torch.mean(torch.linalg.norm((pred_pts - label_pts_1), dim=2), dim=1)
-            norm_2 = torch.mean(torch.linalg.norm((pred_pts - label_pts_2), dim=2), dim=1)
-            min_norm = torch.min(norm_1, norm_2)
-            
-            if args.uncoupled==False:
-                add_s_loss = pred_success_masked*min_norm
-            else:
-                add_s_loss = min_norm
+                    pred_success_list = s_sig(pred_success_list)
+                    pred_success_masked = pred_success_list[point_success_mask]
 
-            add_s_loss_total += torch.mean(add_s_loss).to(self.device)
+                    norm_1 = torch.mean(torch.linalg.norm((pred_pts - label_pts_1), dim=2), dim=1)
+                    norm_2 = torch.mean(torch.linalg.norm((pred_pts - label_pts_2), dim=2), dim=1)
+                    min_norm = torch.min(norm_1, norm_2)
+
+                    geom_loss = pred_success_masked*min_norm
+
+                    if torch.max(min_norm) > 100:
+                        print('geom loss exploded')
+                        from IPython import embed; embed()
+                    geom_loss_list.append(min_norm)
+                else:
+                    pass
+                    # geom_loss_list.append(torch.tensor([0.0]).to(self.device))
+        except Exception as e:
+            print(e)
+            from IPython import embed; embed()
 
         # -- APPROACH AND BASELINE LOSSES --
         total_appr_loss = torch.Tensor([0]).to(self.device)
@@ -292,11 +308,55 @@ class ContactNet(nn.Module):
             appr_loss = torch.linalg.norm(a_pred - a_labels, axis=1)
             total_appr_loss += torch.mean(appr_loss)
 
-        total_loss = self.config['loss']['conf_mult']*conf_loss + self.config['loss']['add_s_mult']*add_s_loss_total + self.config['loss']['width_mult']*width_loss \
-                     + self.config['loss']['appr_vec_mult']*total_appr_loss
-        print(conf_loss.item(), add_s_loss_total.item(), width_loss.item())
+        return geom_loss_list, width_loss, total_appr_loss, label_idx_list #success_idxs #, approach_loss, baseline_loss
 
-        return conf_loss, add_s_loss_total, width_loss, total_appr_loss, total_loss #, approach_loss, baseline_loss
+    def goal_loss(self, pred_success, pred_collide, geom_loss, labels_dict, gt_dict, sg_i, args):
+        '''
+        subgoal collision score loss, per-point confidence loss
+        must be called per goal prediction (so that we can do goal forward pass one by one + fit on GPU
+        '''
+        obj_masks = labels_dict['obj_masks']
+        success_labels = np.array(labels_dict['success'])[:,sg_i,:]
+        success_labels = success_labels.reshape(success_labels.shape[0], -1) #np.transpose(success_labels, axes=(0,2,1))
+        success_labels = torch.Tensor(success_labels).to(self.device)
+
+        noncollide_mask = [True, True, True]
+        pred_success = pred_success.view(len(noncollide_mask), -1)
+        obj_s_labels = success_labels[noncollide_mask][np.nonzero(obj_masks[noncollide_mask,:,0])]
+        obj_s_pred = pred_success[noncollide_mask][np.nonzero(obj_masks[noncollide_mask,:,0])] 
+
+        # -- for visualization --
+        pred_s_mask = obj_s_pred 
+        
+        # -- GRASP CONFIDENCE LOSS --
+        # Use binary cross entropy loss on predicted success to find top-k preds with largest loss
+        if obj_s_pred.shape[0] < 100:
+            obj_k = obj_s_pred.shape[0]
+        else:
+            obj_k = 100
+        conf_loss = torch.topk(self.conf_loss_fn(pred_success[noncollide_mask], success_labels[noncollide_mask]), k=512)[0]
+        if len(conf_loss) > 0:
+            conf_loss = torch.mean(conf_loss).to(self.device)
+            inv_geom_s = []
+            for p, l, geom in zip(pred_success, success_labels.type(torch.bool), geom_loss):
+                pos_s_loss = self.conf_loss_fn(p[l], torch.ones_like(p[l]))
+                inv_geom_s.append(pos_s_loss)
+        else:
+            print('no conf loss')
+            from IPython import embed; embed()
+            conf_loss = torch.tensor([0.0]).to(self.device)
+            obj_conf_loss = torch.mean(torch.topk(self.conf_loss_fn(obj_s_pred, obj_s_labels), k=obj_k)[0]).to(self.device)
+
+            pos_pred_s = pred_success[labels_dict['success'][:,sg_i,:,0].to(torch.bool)].to(self.device)
+
+            self.pos_weight = torch.tensor([1]).to(self.device)
+            conf_sig = nn.Sigmoid().to(self.device)
+            pos_loss = torch.mean(self.conf_loss_fn(conf_sig(pos_pred_s), torch.ones_like(pos_pred_s).to(self.device)))*self.pos_weight.to(self.device)
+            conf_loss = (pos_loss + conf_loss)/2
+
+        sg_loss = None
+
+        return sg_loss, conf_loss, obj_s_pred, obj_s_labels, sum([torch.mean(i) for i in inv_geom_s])
         
     def SAnet_msg(self, cfg):
         '''
@@ -334,6 +394,7 @@ class ContactNet(nn.Module):
         '''
         sa_module = MLP(cfg['mlp'])
         return sa_module
+
     
     def FPnet(self, cfg):
         '''
@@ -363,11 +424,13 @@ class ContactNet(nn.Module):
             ps - list of dropout rates for each head
         note: heads are listed in order SUCCESS_CONFIDENCE, Z1, Z2, WIDTH
         '''
-        head_list = nn.ModuleList()
-        for out_dim, p in zip(cfg['out_dims'], cfg['ps']):
-            head = nn.Sequential(nn.Conv1d(cfg['pointnet_out_dim']+3, 128, 1),
+        head_list = []
+        for i, (out_dim, p) in enumerate(zip(cfg['out_dims'], cfg['ps'])):
+            in_dim = 128+3
+            head = nn.Sequential(nn.Conv1d(in_dim, 128, 1),
                                  nn.BatchNorm1d(128),
                                  nn.Dropout(p),
                                  nn.Conv1d(128, out_dim, 1)).to(self.device)
             head_list.append(head)
+        head_list = nn.ModuleList(head_list)
         return head_list
