@@ -15,7 +15,7 @@ import pyrender
 import trimesh
 import trimesh.transformations as tra
 
-sys.path.append(os.path.join(os.getenv('HOME'), 'subgoal-net/model/utils/'))
+sys.path.append(os.path.join(os.getenv('HOME'), 'cgn/model/utils/'))
 from mesh_utils import Object
 from test_meshcat_pcd import viz_pcd as V
 

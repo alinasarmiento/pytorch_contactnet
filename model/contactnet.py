@@ -1,3 +1,4 @@
+import os
 import os.path
 import sys
 import numpy as np
@@ -141,7 +142,7 @@ class ContactNet(nn.Module):
 
     def get_key_points(self, grasps_list, include_sym=False):
         pts_list = []
-        gripper_object = mesh_utils.create_gripper('panda', root_folder='/home/alinasar/subgoal-net')
+        gripper_object = mesh_utils.create_gripper('panda', root_folder=os.getenv('HOME')+'/cgn')
 
         for poses in grasps_list:
             gripper_np = gripper_object.get_control_point_tensor(poses.shape[0])

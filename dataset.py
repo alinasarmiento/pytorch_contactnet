@@ -27,13 +27,13 @@ def get_dataloader(data_path, batch, size=None, data_config=None, preloaded=Fals
             demo = False
         dataset = ContactDataset(data_path, data_config, batch, size=size, viz=viz, just_init=just_init, demo=demo)
     else:
-        dataset = SavedDataset(os.path.join(os.getenv('HOME'), 'subgoal-net/preloaded'), data_config, batch, just_init=just_init)
+        dataset = SavedDataset(os.path.join(os.getenv('HOME'), 'cgn/preloaded'), data_config, batch, just_init=just_init)
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch)
     print('dataloader created.')
     return dataloader
 
 def viz_grasps(grasps, name, freq=100):
-    gripper_object = mesh_utils.create_gripper('panda', root_folder='/home/alinasar/subgoal-net/')
+    gripper_object = mesh_utils.create_gripper('panda', root_folder=os.getenv('HOME')+'/cgn/')
     gripper_np = gripper_object.get_control_point_tensor(grasps.shape[0])
     hom = np.ones((gripper_np.shape[0], gripper_np.shape[1], 1))
     gripper_pts = np.concatenate((gripper_np, hom), 2).transpose((0,2,1))

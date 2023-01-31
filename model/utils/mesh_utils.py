@@ -70,7 +70,7 @@ class PandaGripper(object):
             root_folder {str} -- base folder for model files (default: {''})
         """
         self.joint_limits = [0.0, 0.04]
-        self.root_folder = '/home/alinasar/subgoal-net' #root_folder
+        self.root_folder = os.getenv('HOME')+'/cgn' #root_folder
         
         self.default_pregrasp_configuration = 0.04
         if q is None:

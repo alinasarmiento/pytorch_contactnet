@@ -106,9 +106,9 @@ def sample_grasp_show(mc_vis, control_pt_list, name=None, freq=100):
 
 def mesh_gripper(mc_vis, pose, name=None, robotiq=False):
     if robotiq:
-        gripper_path = os.path.join(os.getenv('HOME'), 'subgoal-net/gripper_models/robotiq_arg2f_base_link.stl')
+        gripper_path = os.path.join(os.getenv('HOME'), 'cgn/gripper_models/robotiq_arg2f_base_link.stl')
     else:
-        gripper_path = os.path.join(os.getenv('HOME'), 'subgoal-net/gripper_models/panda_gripper/panda_gripper.obj')
+        gripper_path = os.path.join(os.getenv('HOME'), 'cgn/gripper_models/panda_gripper/panda_gripper.obj')
     gripper = meshcat.geometry.ObjMeshGeometry.from_file(gripper_path)
     if name is None:
         name = 'gripper'
