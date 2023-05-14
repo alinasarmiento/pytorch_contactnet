@@ -23,4 +23,7 @@ To visualize different cluttered scenes (8-12 tabletop objects rendered in pyren
 - 004086.npz
 - 005274.npz
 
+## Predicting grasps on your own pointclouds
+The model should work on any pointcloud of shape (Nx3). For most consistent results, please make sure to put the pointcloud in the world frame and center it by subtracting the mean. Do not normalize the pointcloud to a unit sphere or unit box, as "graspability" naturally changes depending on the size of the objects (so we don't want to lose that information about the scene by scaling it).
+
 Happy grasping!
