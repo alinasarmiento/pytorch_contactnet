@@ -78,7 +78,7 @@ def cgn_infer(cgn, pcd, obj_mask=None, threshold=0.5):
     else:
         obj_mask = torch.ones(idx.shape[0])
 
-    points, pred_grasps, confidence, pred_widths, _, pred_collide = cgn(pcd[:, 3:], pos=pcd[:, :3], batch=batch, idx=idx, obj_mask=[obj_mask])
+    points, pred_grasps, confidence, pred_widths, _, pred_collide = cgn(pcd[:, 3:], pos=pcd[:, :3], batch=batch, idx=idx)
     sig = torch.nn.Sigmoid()
     confidence = sig(confidence)
     confidence = confidence.reshape(-1,1)

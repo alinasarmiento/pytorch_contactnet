@@ -35,7 +35,7 @@ class ContactNet(nn.Module):
         
         self.conf_loss_fn = nn.BCEWithLogitsLoss(reduction='none').to(self.device) #nn.BCEWithLogitsLoss(reduction='none', pos_weight=torch.tensor([1])).to(self.device)
         
-    def forward(self, input_pcd, pos, batch, idx, obj_mask, width_labels=None):
+    def forward(self, input_pcd, pos, batch, idx, width_labels=None):
         '''
         maps each point in the pointcloud to a generated grasp
         Arguments

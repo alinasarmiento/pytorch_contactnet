@@ -1,6 +1,5 @@
 *~
 *.npy
-*.npz
 *.obj
 *.csail.mit.edu
 !panda_gripper.obj
