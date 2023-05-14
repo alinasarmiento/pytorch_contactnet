@@ -16,9 +16,9 @@ We're doing our visualizations in MeshCat. In a separate tab, start a meshcat se
 
 From here you can run `python3 eval.py`
 
-To visualize different thresholds, use the `--threshold` argument such as `--threshold=0.8`
+To visualize different confidence threshold masks on the grasps, use the `--threshold` argument such as `--threshold=0.8`
 
-To visualize different cluttered scenes (rendered in pyrender from ACRONYM), use the argument `--scene` and manually feed in a file name such as `--scene=002330.npz`. Sorry that this is so inconvenient right now. Your possible files are:
+To visualize different cluttered scenes (8-12 tabletop objects rendered in pyrender from ACRONYM), use the argument `--scene` and manually feed in a file name such as `--scene=002330.npz`. Sorry that this is so inconvenient right now. Your possible files are:
 - 002330.npz
 - 004086.npz
 - 005274.npz
