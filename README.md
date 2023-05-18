@@ -1,7 +1,7 @@
 # Pytorch Contact-GraspNet
 Pytorch implementation of Contact-GraspNet. Original Tensorflow implementation can be found at: https://github.com/NVlabs/contact_graspnet
 
-DISCLAIMER: This is research code I'm using as a stepping stone toward a different project - your mileage may vary. I'll update this repo periodically but am not actively maintaining it.
+DISCLAIMER: This is research code I'm using as a stepping stone toward a different project - your mileage may vary. I'll update this repo periodically but am not actively maintaining it. That being said, please raise issues when you find them and I'll try and resolve them as quickly as I can.
 
 ## General notes
 The train file is a little broken and will be updated soon along with tools to evaluate the model in Pybullet and on a real world setup. Stay tuned for a cleaner datloader + instructions for interfacing with ACRONYM as well.
